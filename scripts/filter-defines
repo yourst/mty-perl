@@ -1,0 +1,361 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# filter-defines -action1 filename1.h -action2 filename2.h ...
+#
+# where each -action and file tuple is processed in the order it appears,
+# and the -action is one of the following:
+#
+#   -exclude file.h    Add any definitions defined by #define directives
+#                      to the list of symbols to exclude
+#
+#   -undef   file.h    Add any definitions defined by #define directives
+#                      to the list of symbols to explicitly undefine
+#
+#   -include file.h    Add any definitions defined by #define directives
+#                      to the list of symbols to include
+#
+#   -exclude-all       Exclude all definitions by default unless they are
+#                      added to the include list by a subsequent -include
+#                      action later in the list of actions
+#
+#   -undef-all         Undefine all definitions by default unless they are
+#                      added to the include list by a subsequent -include
+#                      action later in the list of actions
+#
+#   -include-all       Include all definitions by default unless they are
+#                      added to the include list by a subsequent -include
+#                      action later in the list of arguments.
+#                      
+#                      (This is the default if neither -include-all nor 
+#                      -exclude-all are specified)
+#
+#   -filter file.h     Apply the current set of filtering rules to each 
+#                      #define directive in the specified file, and write
+#                      the output to stdout as follows:
+#                      
+#                      If a given definition is to be included, output its
+#                      #define line(s) exactly as they were read in.
+#
+#                      If the definition is to be undefined, output a line
+#                      containing '#undef <symbol>'.
+#
+#                      If the definition is to be excluded, output a line
+#                      containing '#pragma exclude define <symbol>' instead
+#                      of the original definition.
+#
+# Any of the -include, -exclude or -filter filenames can be '-' to read the
+# corresponding definitions from stdin instead of a file.
+#
+# Example (to exclude the compiler's default definitions from the preprocessed
+# source code produced by 'g++ -E -dM filename.[cpp|.h]', where the subset of
+# definitions to exclude is obtained by running 'g++ -E -dM - < /dev/null':
+#
+# g++ -E -dM - < /dev/null > baseline-defs.h
+# g++ -E -dM - < file-to-filter.h > file-to-filter.h.i
+# filter-defines -include-all -exclude baseline-defs.h -filter file-to-filter.h.i > filtered-file.h
+#
+
+use integer;
+use warnings;
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Display::Colorize;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::TextInABox;
+use MTY::Display::PrintableSymbolTools;
+use MTY::Display::PrintableSymbols;
+use MTY::RegExp::Define;
+use MTY::RegExp::Tools;
+use MTY::RegExp::Blocks;
+use MTY::RegExp::Numeric;
+use MTY::RegExp::Strings;
+use MTY::RegExp::CxxREs;
+
+use Cwd qw(realpath);
+use File::Basename qw(dirname);
+
+my $DEBUG = 0;
+
+use constant {
+  FILTER  => 2,
+  INCLUDE => 1,
+  EXCLUDE => 0,
+  UNDEF   => -1,
+};
+
+my %action_name_to_action = (
+  'include', INCLUDE,
+  'exclude', EXCLUDE,
+  'undef', UNDEF,
+  'filter', FILTER);
+
+my %action_to_action_name = (
+  INCLUDE, 'include',
+  EXCLUDE, 'exclude',
+  UNDEF, 'undef',
+  FILTER, 'filter');
+
+my %placeholder_style_id_to_template = (
+  'no' => '',
+  'blank' => NL,
+  'nop-pragma' => '#pragma excluded define %'.NL,
+  'pragma' => '#pragma excluded define %'.NL,
+  'undef' => '#undef %'.NL,
+  'undefine' => '#undef %'.NL,
+  'comment' => '// excluded define %'.NL);
+
+my $placeholders_for_excluded_defines = 
+  $placeholder_style_id_to_template{'no'};
+
+my %definitions;
+my %macro_name_to_arg_list;
+my $total_macro_defs = 0;
+my $total_tokens_replaced = 0;
+
+my %include_syms;
+my %exclude_syms;
+my %undef_syms;
+my $default_action = INCLUDE;
+
+my $preprocessor_define_or_other_line_re = compile_regexp(
+  \qr/\G (?: 
+        (?> $preprocessor_define_re) | 
+        (?>^ ([^\n]*+) \n)
+     )/oamsx,
+  'preprocessor_define_or_other_line');
+
+$DEBUG = 0;
+
+sub replace_tokens_with_macro_defs($;$$) {
+  # $_[0] is the target string to process
+  my ($filename, $symbol_name_of_def) = ($_[1], $_[2]);
+
+  my ($leading_whitespace) = ($_[0] =~ /$leading_whitespace_re/oamsxgc);
+  my $line = 1 + length($leading_whitespace =~ s/[^\n]//roamsxg);
+  
+  local $REGMARK = undef;
+
+  my $out = '';
+
+  if ($DEBUG) {
+    print(STDERR $C.' '.arrow_head.' '.$C.$U.
+            'Replacing tokens in file '.$Y.$filename.$C);
+    if (defined($symbol_name_of_def))
+      { print(STDERR ' (within definition of macro '.$Y.$symbol_name_of_def.$C); }
+    print(STDERR ' with any matching macros in line:'.$UX.X.NL.
+            $B.' '.asterisk.' '.$X.format_chunk($_[0]).$X.NL);
+  }
+
+  while ($_[0] =~ /$cxx_token_re/oamsxgc) {
+    my $token = $1;
+    my $whitespace = $+{whitespace} // ''; 
+    my $token_type_id = $REGMARK // CXX_TOKEN_WHITESPACE;
+    my $startpos = $-[0];
+
+    $token =~ s/$backslash_newline_re/ /oamsxg;
+    $whitespace =~ s/$backslash_newline_re/ /oamsxg;
+    rewind($whitespace);
+
+    my $newline = ($whitespace =~ /$nl_cr_ff_not_bs_nl_re/oamsx) ? 1 : 0;
+    rewind($whitespace);
+
+    if ($token_type_id == CXX_TOKEN_IDENTIFIER) {
+      my $replacement = $definitions{$token};
+      if (defined $replacement) {
+        my $macro_arg_list = $macro_name_to_arg_list{$token};
+        if (defined $macro_arg_list) {
+          if ($DEBUG) {
+            print(STDERR $R.' '.x_symbol.' '.$K.
+                    'Functional macro expansion not yet supported on token '.
+                      format_chunk($token).$K.' at offset '.
+                        $G.$startpos.$X.NL);
+          }
+        } else {
+          if ($DEBUG) {
+            print(STDERR $B.' '.checkmark.' '.$K.
+                    'Replaced token '.format_chunk($token).$K.' with '.
+                      format_chunk($replacement).$K.' at offset '.
+                        $G.$startpos.$X.NL);
+          }
+          $token = $replacement;
+          $total_tokens_replaced++;
+        }
+      }
+    }
+
+    $out .= $token . $whitespace;
+    $line += $newline;
+  }
+
+  my $p = pos($_[0]) // 0;
+  
+  if ($p < length($_[0])) {
+    my $parsed_so_far = special_chars_to_printable_symbols(substr($_[0], max($p - 160, 0), min($p, 160)), $G);
+    my $remaining = special_chars_to_printable_symbols(substr($_[0], $p, 160), $R);
+    warn('Could not tokenize all of '.$filename);
+
+    my $cxx_parser_error = 
+      $Y.'Last good token was near line '.
+      $C.$line.$W. ' at offset '.$C.$p.$X.NL.$W.
+      'Remaining input after that point ('.$C.(length($_[0])-$p).
+      $W.' chars):'.$X.NL.$R.$remaining.$K.'...'.$X.NL.NL.
+      $W.'Parsed input up to that point:'.NL.$B.'...'.$G.$parsed_so_far.$X.NL;
+    print(STDERR $cxx_parser_error);
+    die();
+
+    return undef;
+  }
+
+  return $out;
+}
+
+sub process_action($$$$) {
+  my $action = $_[0];
+  my $filename = $_[2] // '(unknown)';
+  my $apply_defs = $_[3] // 0;
+
+  while ($_[1] =~ /$preprocessor_define_or_other_line_re/oamsxgc) {
+    my ($name, $macroargs, $def, $other) = ($1, $2, $3, $4);
+
+    if (defined $other) {
+      if ($DEBUG) { print(STDERR $R.'[other] '.$B.$other.$X.NL); }
+      if ($total_macro_defs > 0) { $other = replace_tokens_with_macro_defs($other, $filename); }
+      print(STDOUT $other.NL);
+      next;
+    }
+
+    if ($DEBUG) {
+      print(STDERR $C.$action_to_action_name{$action}.$K.' '.
+              $K.left_quote.$G.$name.$K.right_quote.'('.$M.($macroargs // '<no macro args>').$K.')'.
+                $B.' '.arrow_barbed.' '.$K.left_quote.$Y.($def // '').$K.right_quote.$X.NL);
+    }
+
+    if ($total_macro_defs > 0) { $def = replace_tokens_with_macro_defs($def, $filename, $name); }
+
+    if ($apply_defs) {
+      $definitions{$name} = $def;
+      my @macro_arg_list;
+      if (defined $macroargs) {
+        @macro_arg_list = split /,/oamsx, $macroargs;
+        $macro_name_to_arg_list{$name} = \@macro_arg_list;
+      }
+
+      if ($DEBUG) {
+        print(STDERR $B.' '.large_plus.' '.$K.'Added macro definition '.
+                $Y.'#'.$total_macro_defs.$K.' for '.
+                  format_chunk($name).$K.' = '.format_chunk($def));
+        if (defined $macroargs) {
+          print(STDERR $K.' with '.$G.scalar(@macro_arg_list).$K.' arguments: '.
+                  format_chunk($macroargs).$K.')');
+        }
+        print(STDERR $X.NL);
+      }
+
+      $total_macro_defs++;
+    }
+
+    if ($action == INCLUDE) {
+      $include_syms{$name} = 1;
+    } elsif ($action == EXCLUDE) {
+      $exclude_syms{$name} = 1;
+    } elsif ($action == UNDEF) {
+      $exclude_syms{$name} = 1;
+      $undef_syms{$name} = 1;
+    } elsif ($action == FILTER) {
+      my $ok_to_include = 
+        (($default_action == INCLUDE) && 
+           (!(exists $exclude_syms{$name}))) ||
+        ((($default_action == EXCLUDE) || ($default_action == UNDEF)) &&
+           (exists $include_syms{$name}));
+      my $ok_to_undef = 
+        (($default_action == UNDEF) &&
+           (!(exists $include_syms{$name}))) ||
+        ((($default_action == INCLUDE) || ($default_action == EXCLUDE)) &&
+           (exists $undef_syms{$name}));
+
+      if ($ok_to_undef) {
+        print(STDOUT '#undef '.$name.NL);
+      } elsif ($ok_to_include) {
+        if ($DEBUG) {
+          print(STDERR $B.'OK to include: '.$K.left_quote.$G.$name.$K.right_quote.
+                  '('.$M.($macroargs // '<no args>').$K.')'.$B.' '.arrow_barbed.' '.
+                    $K.left_quote.$Y.($def // '').$K.right_quote.$X.NL);
+        }
+
+        my $args_out = (defined $macroargs) ? ('('.$macroargs.')') : '';
+        my $def_out = '#define '.$name.$args_out.' '.$def.NL;
+        print(STDOUT $def_out);
+
+        #if ($DEBUG) {
+        #print(STDERR $B.'name     = '.$K.left_quote.$G.$name.$K.right_quote.$X.NL);
+        #print(STDERR $B.'args_out = '.$K.left_quote.$G.$args_out.$K.right_quote.$X.NL);
+        #print(STDERR $B.'def      = '.$K.left_quote.$G.$def.$K.right_quote.$X.NL);
+        #print(STDERR $B.'def_out  = '.$K.left_quote.$G.$def_out.$K.right_quote.$X.NL);
+        #}
+      } else {
+        print(STDOUT ($placeholders_for_excluded_defines =~ s/%/$name/roamsxg));
+      }
+    }
+  }
+
+  if (!finished($_[1])) {
+    die('Failed to finish parsing #defines in file "'.$filename.'": '.
+        'processed '.(pos($_[1]) // 0).' out of '.length($_[1]).' chars; '.
+        'remaining text is '.format_chunk(get_unmatched_remainder($_[1])));
+  }
+
+#  rewind($_[1]);
+
+  # tokenize_cxx($_[1], \$replace_tokens_with_macro_defs_callback, ...
+}
+    
+while (@ARGV) {
+  my $arg = shift;
+
+  if ($arg =~ /^-d(?:ebug)?$/oaxg) {
+    $DEBUG = 1;
+    next;
+  }
+
+  if ($arg =~ /^-([\w\-]+?)-placeholders$/oaxg) {
+    $placeholders_for_excluded_defines = 
+      $placeholder_style_name_to_template{$1};
+    $placeholders_for_excluded_defines //= 
+      $placeholder_style_name_to_template{'no'};
+    next;
+  }
+
+  my ($action_name, $set_default_action_or_apply_defs) = 
+    ($arg =~ /^ -(\w+)
+              (?: -(all | and-apply))?$/oax);
+
+  if (!(defined $action_name)) { die("Invalid argument '$arg'"); }
+
+  my $action = $action_name_to_action{$action_name};
+  if (!(defined $action)) { die("Invalid action '$action'"); }
+
+  $set_default_action_or_apply_defs //= '';
+
+  $set_default_action = ($set_default_action_or_apply_defs eq 'all') ? 1 : 0;
+  my $apply_defs = ($set_default_action_or_apply_defs eq 'and-apply') ? 1 : 0;
+
+  if ($set_default_action) {
+    $default_action = $action;
+    next;
+  }
+
+  my $filename = shift;
+
+  if (!(defined $filename)) 
+    { die("Filename was not specified for action '-$action_name'"); }
+
+  my $is_stdio = ($filename eq '-');
+  my $text = ($is_stdio) ? read_file_handle(STDIN_FD) : read_file($filename);
+  if (!(defined $text)) { die("Cannot read file '$filename'"); }
+
+  process_action($action, $text, $filename, $apply_defs);
+}

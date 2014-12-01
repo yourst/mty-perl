@@ -1,0 +1,67 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# ppidump:
+# Use PPI to dump the abstract syntax tree (AST) of Perl source code
+#
+# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+#
+
+use integer;
+use warnings;
+
+use Cwd qw(realpath);
+use File::Basename qw(dirname fileparse);
+use File::stat;
+use DateTime;
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Filesystem::Files;
+use MTY::Common::Strings;
+use MTY::Display::Colorize;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::PrintableSymbols;
+use MTY::Display::PrintableSymbolTools;
+use MTY::Display::TextInABox;
+use MTY::Display::Tree;
+use MTY::Display::Scrollable;
+use MTY::RegExp::Define;
+use MTY::RegExp::Tools;
+use MTY::RegExp::CxxParser;
+use MTY::RegExp::CxxREs;
+use MTY::RegExp::PerlRegExpParser;
+use MTY::RegExp::PerlSyntax;
+use MTY::RegExp::Blocks;
+use MTY::RegExp::Strings;
+use MTY::RegExp::Numeric;
+use MTY::RegExp::Analyzer;
+
+use MTY::Display::PPITreeFormatter;
+use Data::Dumper;
+use PPI;
+use PPI::Document;
+use PPI::Dumper;
+use Params::Util qw{_INSTANCE};
+
+my $filename = undef;
+
+$filename = $ARGV[0];
+if (!defined $filename) { die('Syntax is: ppidump <perl source file to parse, or use - for stdin>'); }
+if ($filename eq '-') { $filename = '/dev/stdin'; }
+
+print(STDERR $G.' '.checkmark.' '.$Y.'Parsing file '.$G.$filename.$Y.' using PPI'.$K.'...'); STDERR->flush();
+
+my $rootnode = PPI::Document->new($filename);
+
+print(STDERR $G.checkmark.' done!'.$X.NL);
+print(STDERR $G.' '.checkmark.' '.$Y.'Converting PPI Abstract Syntax Tree (AST) into TreePrinter format'.$K.'...'); STDERR->flush();
+
+my $printable_tree = convert_ppi_tree_to_printable_tree($rootnode);
+
+print(STDERR $G.checkmark.' done!'.$X.NL.NL); STDERR->flush();
+
+local $scrollfd = open_scrollable_stream();
+print_tree($printable_tree, $scrollfd);
+
+exit 0;

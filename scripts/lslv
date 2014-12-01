@@ -1,0 +1,340 @@
+#!/usr/bin/perl -w
+# -*- cperl-*-
+#
+# perlwhich: 
+#
+# Find Perl modules by their package names (e.g. Module::Name::Here),
+# or list the package(s) declared in the specified *.pm Perl source files, or
+# print a graphical tree by filenames (*.pm), Module::Names, or the nested
+# namespace hierarchy of modules.
+#
+# Copyright 2003-2014 Matt T Yourst <yourst@yourst.com>. All rights reserved.
+#
+
+use integer; use warnings;
+use MTY::Common::All;
+use MTY::Display::Colorize;
+use MTY::Display::Tree;
+use MTY::Display::PrintableSymbols;
+use MTY::RegExp::Tools;
+use MTY::RegExp::Strings;
+use MTY::System::POSIX;
+use MTY::Filesystem::ProcFS;
+use MTY::Filesystem::Mounts;
+use MTY::Filesystem::Ioctl;
+
+my $print_uuid = 1;
+my $print_luks_uuid = 0;
+my $dump_lvm_command_output_to_file = undef;
+my $read_dumped_lvm_command_output_from_file = undef;
+my $max_size_digits = 4;
+my $only_show_vgs = 0;
+my $show_pv_summary_on_vg_line = 1;
+
+use constant {
+  darkK => fg_color_rgb(104, 104, 104),
+};
+
+my %command_line_options = (
+  'uuid' => [ \$print_uuid, 0, [ 'u' ] ],
+  'luksuuid' => [ \$print_luks_uuid, 0, [ 'luks' ] ],
+  'write' => [ \$dump_lvm_command_output_to_file, OPTION_VALUE_REQUIRED, [ 'dump' ] ],
+  'read' => [ \$read_dumped_lvm_command_output_from_file, OPTION_VALUE_REQUIRED, [ 'test' ] ],
+  'digits' => [ \$max_size_digits, OPTION_VALUE_REQUIRED, [ 'size-digits', 'size-field-width' ] ],
+  'only-vgs' => [ \$only_show_vgs, 0, [ 'vgs', 'vg', 'vgonly', 'vg-only', 'nolvs' ] ],
+  'pvs' => [ \$show_pv_summary_on_vg_line, 0, [ 'pvsummary', 'pv-summary', 'disks' ] ],
+);
+
+my ($extra_lvm_args, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV);
+
+my @lv_fields = qw(lv_uuid lv_name lv_path lv_attr lv_major lv_minor lv_read_ahead lv_kernel_major lv_kernel_minor
+                   lv_kernel_read_ahead lv_size lv_metadata_size seg_count origin origin_size data_percent snap_percent
+                   metadata_percent copy_percent move_pv convert_lv mirror_log data_lv metadata_lv pool_lv lv_tags
+                   lv_time lv_host modules);
+
+my @pv_label_fields = qw(pv_fmt pv_uuid dev_size pv_name pv_mda_free pv_mda_size);
+
+my @pv_fields = qw(pe_start pv_size pv_free pv_used pv_attr 
+                   pv_pe_count pv_pe_alloc_count pv_tags pv_mda_count pv_mda_used_count);
+
+my @vg_fields = qw(vg_fmt vg_uuid vg_name vg_attr vg_size vg_free vg_sysid vg_extent_size vg_extent_count 
+                   vg_free_count max_lv max_pv pv_count lv_count snap_count vg_seqno vg_tags vg_mda_count
+                   vg_mda_used_count vg_mda_free vg_mda_size vg_mda_copies);
+
+my @lv_seg_fields = qw(segtype stripes stripesize stripe_size regionsize region_size chunksize chunk_size
+                       thin_count discards zero transaction_id seg_start seg_start_pe seg_size seg_tags
+                       seg_pe_ranges devices);
+
+my @pv_seg_fields = qw(pvseg_start pvseg_size);
+
+my $cmdline = 'lvs -o lv_all,seg_all,vg_all --nameprefixes --noheadings --nosuffix --units b --sort lv_name '.join(' ', @$extra_lvm_args);
+print(STDERR $B.' '.arrow_head.' '.$Y.'Checking LVM volumes');
+my $lvs_command_output;
+
+if (defined $read_dumped_lvm_command_output_from_file) {
+  $lvs_command_output = read_file($read_dumped_lvm_command_output_from_file) 
+    || die("Cannot read $read_dumped_lvm_command_output_from_file");
+} else {
+  $lvs_command_output = qx{$cmdline 2>/dev/null};
+}
+
+my @cmdout = split(/\n+/oax, $lvs_command_output);
+
+print(STDERR carriagereturn.$ERASE_TO_END_OF_LINE); # $G.' '.checkmark.' '.$Y.'Checked all LVM volumes'.$X.NL);
+
+my %vg_to_lvs = ( );
+
+my $lv_name_in_path_re = qr{/dev/([^/]++)/(.++)$}oax;
+
+my $longest_lv_name_length = 0;
+
+my $lvm_field_equals_quoted_value_re = 
+  qr{\s*+ LVM2_(\w++) = ' ($inside_single_quoted_string_nocap_re) '}oax;
+
+my %uuid_to_lv;
+
+if (defined $dump_lvm_command_output_to_file) {
+  write_file($dump_lvm_command_output_to_file, join(NL, @cmdout))
+    || die("Cannot write dump to $dump_lvm_command_output_to_file");
+}
+
+
+my $dev_list_re = qr{/dev/ ([^\(\s]++) \s*+ \( ([^\)]++) \) \s*+}oax;
+
+my %pv_to_vg;
+my %vg_to_pv_list;
+my %vg_to_info;
+
+foreach $line (@cmdout) {
+  next if (!is_there($line));
+
+  my $lvinfo = { };
+
+  while ($line =~ /$lvm_field_equals_quoted_value_re/oaxg) { $lvinfo->{lc($1)} = $2; }
+
+  my ($lvuuid, $lvname, $vguuid, $vgname) = 
+    @{$lvinfo}{lv_uuid, lv_name, vg_uuid, vg_name};
+
+  if (exists $uuid_to_lv{$lvuuid}) {
+    #print(STDERR '(Duplicate LV with UUID '.$lvuuid.': '.$vgname.'/'.$lvname.')'.NL);
+    next;
+  }
+
+  if (!exists $vg_to_info{$vgname}) {
+    my $vginfo = { };
+    while (my ($k, $v) = each %$lvinfo) {
+      next if ($k !~ /^vg_/oax);
+      $vginfo->{$k} = $v;
+    }
+    $vginfo->{vg_online} = (-d '/dev/'.$vgname.'/') ? 1 : 0;
+    $vg_to_info{$vgname} = $vginfo;
+  }
+
+  $uuid_to_lv{$lvuuid} = $lvinfo;
+
+  #print("[$vgname] / [$lvname]\n");
+
+  my @attrs = split('', $lvinfo->{lv_attr});
+  #print(join('/', @attrs).NL);
+ 
+  $lvinfo->{lv_type} = $attrs[0];
+  $lvinfo->{lv_readonly} = ($attrs[1] eq 'w') ? 0 : 1;
+  $lvinfo->{lv_state} = $attrs[4];
+  $lvinfo->{lv_online} = ($attrs[4] eq 'a') ? 1 : 0;
+  $lvinfo->{lv_open} = ($attrs[5] eq 'o') ? 1 : 0;
+  $lvinfo->{lv_target_type} = $attrs[6];
+  $lvinfo->{lv_zero_new_blocks} = ($attrs[7] eq 'z') ? 1 : 0;
+  $lvinfo->{lv_partial} = ($attrs[8] eq 'p') ? 1 : 0;
+
+  my $device_list_text = $lvinfo->{devices};
+  my $device_list = { };
+
+  while ($device_list_text =~ /$dev_list_re/oaxg) {
+    $pv_to_vg{$1} = $vgname;
+    $device_list->{$1} = $2;
+  }
+
+  $lvinfo->{device_list} = $device_list;
+
+  my $lvs_in_vg = $vg_to_lvs{$vgname};
+
+  if (!defined $lvs_in_vg) { 
+    $lvs_in_vg = [ ]; 
+    $vg_to_lvs{$vgname} = $lvs_in_vg;
+  }
+
+  push @$lvs_in_vg, $lvinfo;
+
+  set_max($longest_lv_name_length, length($lvname));
+}
+
+while (my ($pv, $vg) = each %pv_to_vg) { push @{$vg_to_pv_list{$vg}}, $pv; }
+
+my %pv_to_size = ( );
+my %pv_to_uuid = ( );
+
+my $lvm2_header_pv_uuid_re = qr{\0 LVM2 \s \d{3} (\w{6})(\w{4})(\w{4})(\w{4})(\w{4})(\w{4})(\w{6}) \0}oamsx;
+
+foreach my $pv (sort keys %pv_to_vg) {
+  my $pv_dev = '/dev/'.$pv;
+  sysopen(my $fd, $pv_dev, O_RDONLY) 
+    || die("Cannot open device '$pv' to query size and read LVM metadata");
+  $pv_to_size{$pv} = get_block_dev_size($fd) // 0;
+  my $metadata = ' ' x 65536;
+  sysread($fd, $metadata, 65536) || die("Cannot read from block device '$pv'");
+  my @uuid_parts = ($metadata =~ /$lvm2_header_pv_uuid_re/oamsx);
+
+  if (scalar(@uuid_parts) == 7) {
+    my $uuid = join('-', @uuid_parts);
+    $pv_to_uuid{$pv} = $uuid;
+  }
+  close($fd);
+}
+
+my $rootnode = [
+  U.'Local LVM Configuration:'.UX,
+  [ TREE_CMD_FIELD ],
+  darkK.padstring(U.'Size', -12).UX,
+  [ TREE_CMD_FIELD ],
+  darkK.U.'Flags/Avail'.UX
+];
+
+if ($print_uuid) { push @$rootnode, [ TREE_CMD_FIELD ], darkK.U.'UUID'.UX; }
+
+$rootnode = [ $rootnode ];
+
+my @vgs = sort keys %vg_to_lvs;
+
+my $show_pvs_separately = 1;
+
+my $green_comma_sep_sym = G_1_2.','.G;
+my $blue_comma_sep_sym = B_1_2.','.B;
+my $yellow_comma_sep_sym = Y_1_2.','.Y;
+my $red_comma_sep_sym = R_1_2.','.R;
+
+my $lv_uuid_color = fg_color_rgb(32, 64, 48);
+my $pv_uuid_color = fg_color_rgb(64, 64, 32);
+my $vg_uuid_color = fg_color_rgb(32, 48, 64);
+
+#
+# Return the plural word suffix 's' if the argument's effective count is
+# greater than 1 or is zero, or return the empty string '' if it is zero.
+# The argument may be either a simple integer, or an array reference
+# (the effective count is the size of the array), or a hash reference
+# (the effective count is the number of keys).
+#
+# This only works properly for languages with uniform pluralization rules
+# including e.g. EN, FR, ES, IT, PT, etc., but not most others, plus it
+# may fail on words which require more than just appending an 's', since
+# it doesn't use any dictionary (it merely adds this suffix for any
+# arguments other than '1').
+#
+sub plural(+) {
+  my ($arg) = @_;
+  $arg //= 0;
+  
+  my $n = 
+    (is_scalar $arg) ? $arg :
+    (is_array_ref $arg) ? scalar(@$arg) :
+    (is_hash_ref $arg) ? scalar(keys %$arg) : 0;
+
+  return ($n != 1) ? 's' : '';
+}
+
+foreach $vg (@vgs) {
+  my $lvs = $vg_to_lvs{$vg};
+  my $pvlist = $vg_to_pv_list{$vg};
+
+  my $vginfo = $vg_to_info{$vg};
+  die if (!defined $vginfo);
+  
+  my $vg_size = $vginfo->{vg_size};
+  my $vg_free = $vginfo->{vg_free};
+
+  my $vg_online = $vginfo->{vg_online};
+
+  my $vglabel = [ 
+    [ TREE_CMD_SYMBOL, ($vg_online) ? C.double_disc_black : C_1_2.double_disc ],
+    (($vg_online) ? C_2_3 : C_1_2).'VG '.(($vg_online) ? U.C : C_1_2).$vg.UX,
+  ];
+  
+  if ($show_pv_summary_on_vg_line) {
+    push @$vglabel, M_1_2.' '.approx_equal_symbol.' '.M.sizeof($pvlist).M_1_2.' PV'.plural($pvlist).': '.M.join(' ', @$pvlist[0..min(sizeof($pvlist), 5)-1]);
+    if (sizeof($pvlist) > 5) { push @$vglabel, K_2_3.'...'; }
+  }
+
+  if (!$vg_online) { push @$vglabel, R.' '.x_symbol.' (offline) '.X; }
+
+  push @$vglabel, (
+    [ TREE_CMD_FIELD ],
+    B.padstring(format_size_with_units($vg_size, $max_size_digits, $blue_comma_sep_sym, B_1_2.' '), -12).' ',
+    [ TREE_CMD_FIELD ],
+    B.padstring(format_size_with_units($vg_free, $max_size_digits, $blue_comma_sep_sym, B_1_2.' '), -12).' free',
+  );
+
+  if ($print_uuid) { push @$vglabel, [ TREE_CMD_FIELD ], $vg_uuid_color.$vginfo->{vg_uuid}.X; };
+
+  my $vgnode = [ $vglabel ];
+
+  if ($show_pvs_separately) {
+    foreach $pv (@$pvlist) {
+      my $pv_size = $pv_to_size{$pv} // '?';
+      my $pv_uuid = $pv_to_uuid{$pv} // '?';
+      my $pv_online = $vg_online;
+      my $pvnode = [ 
+        [ TREE_CMD_SYMBOL, (($pv_online) ? Y.single_disc : R.circle_with_shadow) ],
+        (($pv_online) ? Y_1_2.'PV '.Y.$pv.' ' : R_1_2.'PV '.$pv.' '),
+        [ TREE_CMD_FIELD ],
+        Y.padstring(format_size_with_units($pv_size, $max_size_digits, $yellow_comma_sep_sym, Y_1_2.' '), -12).K.'  ',
+        [ TREE_CMD_FIELD ],
+      ];
+      if ($print_uuid) { push @$pvnode, [ TREE_CMD_FIELD ], $pv_uuid_color.$pv_uuid; };
+      push @$vgnode, [ $pvnode ];
+    }
+  }
+
+  push @$rootnode, $vgnode;
+
+  next if ($only_show_vgs);
+
+  foreach $lv (@$lvs) {
+    my $lv_online = $lv->{lv_online};
+
+    my $colorized_attrs = 
+      C.$lv->{lv_type}.' '.
+      ($lv->{lv_readonly} ? R.'RO' : G.'rw').' '.
+      M.$lv->{lv_state}.' '.
+      ($lv->{lv_open} ? G.checkmark : K.'-').' '.
+      Y.$lv->{lv_target_type}.X;
+
+    my @device_list = sort keys %{$lv->{device_list}};
+    my $formatted_dev_list = ((scalar @$pvlist) > 1) ? $M.join(' ', @device_list).'  ' : '';
+    # foreach $pv (sort keys %$device_list) { $formatted_dev_list .= $M.$pv.$K.':'.$B.$extents.' '; }
+
+    my $lv_opened_color = ($lv->{lv_open}) ? fg_color_rgb(160, 255, 224) : rgbfgG;
+    my $dark_lv_opened_color = fg_color_rgb(scale_rgb($lv_opened_color, 0.6));
+
+    my $seg_count = $lv->{seg_count};
+    my $seg_count_symbol = chr(ord(dice_1_dots) + ($seg_count - 1));
+
+    my $seg_count_string = ($seg_count > 1) ? # rgbfgM.padstring(open_diamond x $lv->{seg_count}, 8)
+      ' '.rgbfgM.$lv->{seg_count}.M_1_2.' segs  ' : (' ' x 11);
+
+    my $lvnode = [ 
+      [ TREE_CMD_SYMBOL, (($lv_online) ? (($lv->{lv_open} ? $lv_opened_color : $dark_lv_opened_color).$seg_count_symbol) : R_2_3.x_in_box) ],
+      (($lv_online) ? ($lv_opened_color.($lv->{lv_open} ? U : '')) : (R_1_2)).$lv->{lv_name}.UX.X.'  ',
+      [ TREE_CMD_FIELD ],
+      G.padstring(format_size_with_units($lv->{lv_size}, $max_size_digits, $green_comma_sep_sym, G_1_2.' '), -12).'  ',
+      [ TREE_CMD_FIELD ],
+      $colorized_attrs.'  ',
+      $seg_count_string,
+      $formatted_dev_list,
+    ];
+
+    if ($print_uuid) { push @$lvnode, [ TREE_CMD_FIELD ], $lv_uuid_color.$lv->{lv_uuid}; }
+
+    push @$vgnode, [ $lvnode ];
+  }
+}
+
+print_tree($rootnode);

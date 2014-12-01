@@ -1,0 +1,58 @@
+#!/usr/bin/perl
+
+use POSIX;
+
+open(F, '/proc/cpuinfo') || die ("cpuinfo: Unable to open /proc/cpuinfo\n");
+
+$regexp = qr/^(.+?)\s*\:\s*(.*)$/oa;
+
+$include_all_keys = 1;
+%include_key = ();
+%exclude_key = ();
+$include_all_cpus = 1;
+@include_cpu = ();
+
+foreach $arg (@ARGV) {
+  if ($cpu = ($arg =~ /^(\d+)$/)) {
+    $cpu = $1;
+    $include_all_cpus = 0;
+    $include_cpu[$cpu] = 1;
+    # print("include cpu $cpu\n");
+  } elsif (($exclude, $key) = ($arg =~ /^(-?)(\w+)$/)) {
+    $key = lc($key);
+    $include = ($exclude ne '-');
+    $exclude = ($exclude eq '-');
+    $include_all_keys = 0 if ($include);
+    $include_key{$key} = 1 if ($include);
+    $exclude_key{$key} = 1 if ($exclude);
+    # print("include for $key = [$include], include_all_keys = $include_all_keys\n");
+  }
+}
+
+$cpu_count = 0;
+
+while (<F>) {
+  chomp;
+  if (($key, $value) = /$regexp/) {
+    $key =~ s/ /_/g;
+    $key = lc($key);
+    
+    if ($key eq 'processor') {
+      $cpu = int($value);
+      $cpu_count++;
+    } elsif ($key eq 'model_name') {
+      $value =~ s/\((R|r|TM|tm)\)//aog;
+      $value =~ s/\s+(CPU|Processor)//aog;
+      $value =~ s/\s*@.+Hz//aogi;
+    } elsif ($key eq 'cpu_mhz') {
+      $key = 'mhz';
+      $value = int(POSIX::ceil($value));
+    }
+    next if (!($include_all_cpus || $include_cpu[$cpu]));
+    $include = ($include_all_keys || exists($include_key{$key})) && (!exists($exclude_key{$key}));
+    #print("cpu${cpu}_${key} = $include\n");
+    print('cpu' . $cpu . '_' . $key . "='" . $value . "'\n") if ($include);
+  }
+}
+
+print("cpu_count=$cpu_count\n");

@@ -1,0 +1,309 @@
+#!/usr/bin/perl
+# -*- cperl -*-
+#
+# autogen-reverse-dns-and-dhcp
+#
+# Copyright 2008-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+#
+
+use integer;
+
+sub valid {
+  my ($s) = @_;
+  return (defined($s)) && (length($s) > 0);
+}
+
+sub read_from_filename($) {
+  my ($filename) = @_;
+  if (!open(IN, '<', $filename)) { print(STDERR "Warning: cannot open $filename for reading\n"); return undef; };
+  local $/;
+  my $s = <IN>;
+  close(IN);
+  return $s;
+}
+
+($mode, $domain) = @ARGV;
+
+if (!defined($domain) || (!length($domain))) {
+  print('Syntax is: autogen-reverse-and-dhcp [-rdns|-dhcp] base.domain.name.here < dnsfile.zone'."\n\n");
+  exit(1);
+}
+
+sub print_error {
+  my ($text) = @_;
+  print('autogen-reverse-and-dhcp: ERROR: '.$text."\n");
+  exit(2);
+}
+
+$rdns_mode = ($mode eq "-rdns");
+$dhcp_mode = ($mode eq "-dhcp");
+
+if (!($rdns_mode || $dhcp_mode)) {
+  print_error('Unknown mode "'.$mode.'": must be one of -rdns or -dhcp');
+}
+
+%ip_to_comments = ();
+
+$comment_char = ($rdns_mode ? ';' : '#');
+
+sub add_comment {
+  my ($ip, $name, $comment, $skip_printing) = @_;
+  $comment = "$comment_char host $name IP $ip: $comment\n";
+
+  print(STDERR $comment) if (!$skip_printing);
+
+  if (!exists($ip_to_comments{$ip})) { $ip_to_comments{$ip} = ''; }
+  $ip_to_comments{$ip} .= $comment;
+}
+
+$remove_comments_re = qr/^ ([^;]*) ; (.*) $/oax;
+$special_autogen_action_comment_re = qr/^ \s* \+\+AUTOGEN: \s+ (\S+) \s+ (.+)$/oax;
+$split_name_type_data_re = qr/^ (\S+) \s+ (?: IN \s+)? (\w+) \s+ (.+?) \s* $/oax;
+$include_re = qr/^ \s* \$INCLUDE \s+ (.+)$/oax;
+
+#
+# Specifying actions for autogen-reverse-dns-and-dhcp using special comments
+# in the form ';++AUTOGEN action arguments':
+#
+# ;++AUTOGEN: rdns-soa nameserver.yourdomain.com admin@yourdomain.com refresh retry expiry minimum
+#
+#   Override the default SOA record parameters written to the .rdns.zone
+#   file with the desired master name server, domain admin e-mail address,
+#   and the SOA refresh/retry/expiry/minimum times, e.g. 4H (4 hours), etc.
+#   (see ISC BIND zone file format documentation for details)
+#
+# ;++AUTOGEN: subnet network/netmask
+#
+#    Specify the subnet mask for IPv4 addresses in the specified network,
+#    e.g. 1.2.3.4/24, 5.6.7.8/29, 10.9.0.0/16, etc. This must be specified
+#    so autogen-reverse-dns-and-dhcp can include the proper number of octets
+#    in the .in-addr.arpa PTR records in the .rdns.zone file.
+#
+#    For example,if ';++AUTOGEN: subnet 10.1.2.0/24 ' is found anywhere in the 
+#    input file, for any hosts with 10.1.2.* IPs (A records), the .rdns.zone 
+#    output will only use the final octet of the host's IP address (8 bits)
+#    to generate e.g. '1 IN PTR host1.yourdomain.com', or for a /16 subnet,
+#    e.g. '1.2 IN PTR ...', etc. with the name encoded byte order reversed
+#    in accordance with RFC 1035 and RFC 2317.
+#    
+#    For subnet masks which aren't an integral number of bytes (i.e. anything
+#    except /8, /16, /24, /32), autogen-reverse-dns-and-dhcp rounds up to the
+#    next byte boundary to determine how many octets to include in the reversed 
+#    name, for instance /24 to /32 will all yield PTR records with a single
+#    octet, while /23 will include the last two octets (in reverse order).
+#
+#    If no subnet mask is specified for any IPs in the input file, the default
+#    subnet mask size of /24 is used, which may not be desired for some networks.
+#
+# ;++AUTOGEN: add-to-rdns any_text_here
+# 
+#   Add the line specified by 'any_text_here' into the .rdns.zone file
+#   at the current position. This is typically used to insert $INCLUDE
+#   directives and similar commands into the .rdns.zone file
+# 
+# ;++AUTOGEN: add-to-dhcp any_text_here
+# 
+#    Similar to add-to-rdns, but adds the line to the .dhcp file.
+#
+
+$add_to_rdns_output = '';
+$add_to_dhcp_output = '';
+$soa_domain = '';
+$rdns_soa_ns = 'ns1';
+$rdns_soa_email = 'admin@localhost';
+$rdns_soa_refresh = '4H';
+$rdns_soa_retry = '2M';
+$rdns_soa_expiry = '4W';
+$rdns_soa_minimum = '1H';
+
+@subnets = ();
+
+sub ip_dotted_decimal_to_32bit($) {
+  my ($ip_dotted_decimal) = @_;
+  my @octets = split(/\./, $ip_dotted_decimal);
+  my $ip = ((int($octets[0]) << 24) + (int($octets[1]) << 16) + (int($octets[2]) << 8) + (int($octets[3]) << 0));
+  #print("[ip_dotted_decimal_to_32bit($ip_dotted_decimal) => $octets[0], $octets[1], $octets[2], $octets[3] => $ip]\n");
+  return $ip;
+}
+
+sub process_autogen_action($$) {
+  my ($action, $args) = @_;
+
+  if ($action eq 'rdns-soa') {
+    ($rdns_soa_ns, 
+     $rdns_soa_email, 
+     $rdns_soa_refresh, 
+     $rdns_soa_retry, 
+     $rdns_soa_expiry, 
+     $rdns_soa_minimum) = 
+       split(/\s+/, $args);
+  } elsif ($action eq 'subnet') {
+    #print(STDOUT "[ subnet args = '$args' ]\n");
+    if ($args =~ /([0-9\.]+) \s* \/ \s* (\d+)/oax) {
+      my $ip = ip_dotted_decimal_to_32bit($1);
+      my $bits = int($2);
+      my $hostbits = (32 - $bits);
+      my $netmask = ((1 << $bits)-1) << $hostbits;
+      $ip &= $netmask; # the user should do this anyway, but make sure it's true
+      my $hostmask = (1 << (32-$bits))-1;
+      my $host_octets = ((32 - $bits) + 7) >> 3;
+      #print("[ push: $ip $bits $netmask $hostmask $host_octets ]\n");
+      push @subnets, [ $ip, $bits, $netmask, $hostmask, $host_octets ];
+    }
+  } elsif ($action eq 'add-to-rdns') {
+    $add_to_rdns_output .= $args . "\n";
+    add_comment('any', '(general)', "Add to rDNS output: $args", 1);
+  } elsif ($action eq 'add-to-dhcp') {
+    $add_to_dhcp_output .= $args . "\n";
+    add_comment('any', '(general)', "Add to DHCP output: $args", 1);
+  }
+}
+
+sub ip_to_subnet_info($) {
+  my ($target_ip_dotted_decimal) = @_;
+  my $target_ip = ip_dotted_decimal_to_32bit($target_ip_dotted_decimal);
+  #print(STDOUT "[ip_to_subnet_info: $target_ip_dotted_decimal => $target_ip]:\n");
+
+  foreach $subnet (@subnets) {
+    my ($subnet_ip, $bits, $netmask, $hostmask, $host_octets) = @{$subnet};
+    #print(STDOUT "[  $subnet_ip, $bits, $netmask, $hostmask, $host_octets]\n");
+    if (($target_ip & $netmask) == $subnet_ip) { return $subnet; }
+  }
+  return undef;
+}
+
+sub ip_to_host_octets($) {
+  my ($target_ip_dotted_decimal) = @_;
+
+  $subnet_info = ip_to_subnet_info($target_ip_dotted_decimal);
+  # assume a default of /24:
+  if (!defined($subnet_info)) { return 99; }
+  return $subnet_info->[4];
+}
+
+while (<STDIN>) {
+  #
+  # Ignore most comments (... ; comment here), but process special comments
+  # starting with ';++AUTOGEN: ' used to control the output produced by
+  # autogen-reverse-dns-and-dhcp as described above for process_autogen_action().
+  #
+  chomp;
+  $line = $_;
+  if ($line =~ /$remove_comments_re/oax) {
+    $line = $1;
+    $comment = $2;
+    if ($comment =~ /$special_autogen_action_comment_re/oax) {
+      process_autogen_action($1, $2);
+    }
+  }
+
+  if ($line =~ /$include_re/oax) {
+    $include_filename = $1;
+    #++MTY TODO
+  }
+
+  ($name, $type, $data) = ($line =~ /$split_name_type_data_re/oax);
+  next if (!valid($name));
+  # print("name [$name] type [$type] data [$data]\n");
+
+  $ip = $name_to_ip{$name} if (exists($name_to_ip{$name}));
+
+  if ((($type eq 'PTR') || ($type eq 'HINFO')) && (!valid($ip))) {
+    print_error("$name: IP address was not specified by A record prior to $type record"); 
+  }
+
+  if ($type eq 'SOA') {
+    $soa_domain = $name;
+    # unknown domain - externally specified by named.conf
+    $soa_domain = ($name ne '@') ? $name : '';
+    ($rdns_soa_ns, $rdns_soa_email) = ($data =~ /(\S+) \s+ (\S+) \s* \(/oax);
+  } elsif ($type eq 'A') {
+    $ip = $data;
+    $name_to_ip{$name} = $ip;
+    if (exists($ip_to_name{$ip})) {
+      add_comment($ip, $name, "IP $ip already pointed to host ".$ip_to_name{$ip}.
+                  " (*not* updated - use PTR record to override)\n");
+    } else {
+      $ip_to_name{$ip} = $name.'.'.$domain;
+    }
+  } elsif ($type eq 'PTR') {
+    # Override reverse DNS name:
+    add_comment($ip, $name, "override reverse mapping of IP $ip using PTR record: ".
+                "old name ".$ip_to_name{$ip}." => new name ".$data);
+    $ip_to_name{$ip} = $data;
+  } elsif ($type eq 'HINFO') {
+    ($subtype, $value) = ($data =~ /^\s*"(.+)"\s+"(.+)"/);
+    $name_to_hinfo{$name}{$subtype} = $value;
+
+    if ($subtype =~ /(hw|eth|mac|phys?)(?:addr)?/oax) {
+      $value =~ s/-/:/g;
+      $ethaddr = $value;
+      $name_to_ethaddr{$name} = $ethaddr;
+      if (exists($ethaddr_to_name{$ethaddr})) {
+        add_comment($ip, $name, "ethaddr $ethaddr was already mapped to host ".
+                    $ethaddr_to_name{$ethaddr}."; overriding old mapping");
+      }
+      $ethaddr_to_name{$ethaddr} = $name;
+      $ip_to_ethaddr{$ip} = $ethaddr;
+      if (exists($ethaddr_to_ip{$ethaddr})) {
+        add_comment($ip, $name, "ethaddr $ethaddr was already mapped to IP ".
+                    $ethaddr_to_ip{$ethaddr}."; overriding old mapping");
+      }
+      $ethaddr_to_ip{$ethaddr} = $ip;
+    }
+  }
+}
+
+print("$comment_char\n".
+      "$comment_char *** WARNING *** This file is auto-generated by autogen-reverse-and-dns!\n" .
+      "$comment_char Do not edit this file; only edit the corresponding forward DNS zone file!\n" .
+      "$comment_char\n\n");
+
+if ($rdns_mode) {
+  $timestamp = time();
+  print("\$TTL 4H\n" .
+        '@ IN SOA '.$rdns_soa_ns.' '.$rdns_soa_email.' ('."\n" .
+        '  '.$timestamp."\n".
+        '  '.$rdns_soa_refresh."\n".
+        '  '.$rdns_soa_retry."\n".
+        '  '.$rdns_soa_expiry."\n".
+        '  '.$rdns_soa_minimum."\n".
+        ")\n\n");
+
+  if (exists($ip_to_comments{'any'})) {
+    print($ip_to_comments{'any'});
+  }
+
+  print($add_to_rdns_output);
+
+  foreach my $ip (sort keys %ip_to_name) {
+    my $name = $ip_to_name{$ip};
+    my @ip_octets = split(/\./, $ip);
+
+    my $host_octets = ip_to_host_octets($ip);
+    #print(STDOUT "[ $ip => host_octets $host_octets ]\n");
+
+    for (my $i = 0; $i < $host_octets; $i++) {
+      print('.') if ($i > 0);
+      print($ip_octets[3-$i]);
+    }
+
+    print("\t".'PTR  '.$name.".\n");
+
+    if (exists($ip_to_comments{$ip})) { 
+      print($ip_to_comments{$ip}); 
+    }
+  }
+} elsif ($dhcp_mode) {
+  foreach $ethaddr (sort keys %ethaddr_to_name) {
+    $name = $ethaddr_to_name{$ethaddr};
+    $ip = $name_to_ip{$name};
+    print("host $name { hardware ethernet $ethaddr; fixed-address $ip; }\n");
+    if (exists($ip_to_comments{$ip})) { 
+      print($ip_to_comments{$ip}); 
+    }
+  }
+}
+
+exit(0);
+

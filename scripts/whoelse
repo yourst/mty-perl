@@ -1,0 +1,35 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+
+$total_login_count = 0;
+($who, $total_login_count) = split(/\n/, `who -q`);
+
+@users = split(/\s+/, $who);
+%unique_users = ();
+
+foreach $user (@users) {
+  if (!exists($unique_users{$user})) {
+    $unique_users{$user} = 1;
+  } else {
+    $unique_users{$user}++;
+  }
+}
+
+$user = $ARGV[0];
+if (defined($user)) {
+  $count = $unique_users{$user} // 0;
+  print($count."\n");
+} else {
+  $n = 0;
+  foreach $user (keys %unique_users) {
+    $count = $unique_users{$user};
+    if ($count > 1) {
+      print("$user($count)");
+    } else {
+      print("$user");
+    }
+    print(' ') if (!$n++);
+  }
+
+  print("\n");
+}

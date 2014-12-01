@@ -1,0 +1,766 @@
+#!/usr/bin/perl -w
+# -*- cperl-*-
+#
+# perlwhich: 
+#
+# Find Perl modules by their package names (e.g. Module::Name::Here),
+# or list the package(s) declared in the specified *.pm Perl source files, or
+# print a graphical tree by filenames (*.pm), Module::Names, or the nested
+# namespace hierarchy of modules.
+#
+# Copyright 2003-2014 Matt T Yourst <yourst@yourst.com>. All rights reserved.
+#
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Common::CommandLine;
+use MTY::Filesystem::Files;
+use MTY::Filesystem::FileStats;
+use MTY::Filesystem::EnhancedFileStats;
+use MTY::Common::Strings;
+use MTY::Filesystem::SearchableDirList;
+use MTY::Display::ANSIColorREs;
+use MTY::Display::ColorCapabilityCheck;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::Colorize;
+use MTY::Display::PrintableSymbols;
+use MTY::Display::PrintableSymbolTools;
+use MTY::Display::Scrollable;
+use MTY::Display::TextInABox;
+use MTY::Display::Tree;
+use MTY::RegExp::Define;
+use MTY::RegExp::Tools;
+use MTY::RegExp::Blocks;
+use MTY::RegExp::FilesAndPaths;
+use MTY::RegExp::Numeric;
+use MTY::RegExp::PerlSyntax;
+use MTY::RegExp::Strings;
+use MTY::System::POSIX;
+
+use File::Find;
+use Config;
+
+#
+# These variables are set by the command line options below:
+#
+my $quiet = 1;
+my $print_modname = undef;
+my $print_filename = undef;
+my $print_version = undef;
+my $print_format = undef;
+
+my $print_code = 0;
+my $query_all_modules = 0;
+my $show_include_path = 0;
+my $show_system_lib_dirs = 0;
+my @update_module_package_to_filename_caches = ( );
+my $update_system_module_package_to_filename_cache = 0;
+my $update_user_module_package_to_filename_cache = 0;
+my $check_package_vs_filename_consistency = 0;
+
+my $read_module_names_from_stdin = (! -t 0);
+my $show_missing_modules_too = 0;
+my $show_only_missing_modules = 0;
+my $show_warnings = 0;
+my $force_colorize = undef;
+
+my $perl_version = undef;
+my $only_include_system_dirs = 0;
+my $only_include_user_dirs = 0;
+my $table_format = undef;
+
+my $print_fully_qualified_namespace_in_tree = 0;
+my $show_tree = undef; # one of the TREE_TRUNK_* constants
+my $shorten_search_paths = undef;
+my @search_path_list = @INC;
+
+my $dir_component_color = fg_color_rgb(128, 192, 240);
+my $dir_sep_color = fg_color_rgb(75, 120, 160);
+my $shortened_search_path_color = C_2_3;
+
+my %search_path_to_short_name;
+
+# Printable tree types: what should the first level of nodes represent?
+use constant {
+  TREE_TRUNK_FILENAMES       => 1, # root -> filenames -> module packages declared within each file
+  TREE_TRUNK_MODULE_PACKAGES => 2, # root -> module packages -> filenames which declare each package
+  TREE_TRUNK_NAMESPACES      => 3, # root -> module package components (i.e. My::Long::Name is My -> Long -> Name)
+};
+
+# valid names are:
+# - 'file' or 'filename' or 'path' (first list the .pm files, then the leaves are the packages they declare)
+# - 'module' or 'package' (first list the package names, then the leaves are for each .pm file)
+# - 'namespace' (tree of nested package namespaces)
+
+my %command_line_options = (
+  #
+  # Modes of operation (mutually exclusive):
+  #
+  # Default without one of the following options is to find and print
+  # the location of the .pm file(s) of the specified module package(s).
+  #
+  'code' => [ \$print_code, 0, ['c', 'l', 'list', 'show', 'source', 's'] ],
+  'query' => [ \$query_all_modules, 0, ['a'] ],
+  'filename-tree' => [ \$show_tree, 0, [ 'tree', 'filetree' ], TREE_TRUNK_FILENAMES ],
+  'package-tree' => [ \$show_tree, 0, [ 'module-tree', 'modtree' ], TREE_TRUNK_MODULE_PACKAGES ],
+  'namespace-tree' => [ \$show_tree, 0, [ 'nested-package-tree', 'nstree', 'ns' ], TREE_TRUNK_NAMESPACES ],
+  'table' => [ \$table_format, 0, 't' ],
+  'showpath' => [ \$show_include_path, 0, ['i', 'showpaths', 'showinc'] ],
+  'libdirs' => [ \$show_system_lib_dirs, 0, ['libs', 'showlibs', 'showlib', 'lib', 'stdlib', 'stdlibs', 'syslibs', 'sysdirs'] ],
+  'cache' => [ \@update_module_package_to_filename_caches, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ ] ],
+  'syscache' => [ \$update_system_module_package_to_filename_cache, 0, [ 'sc' ] ],
+  'usercache' => [ \$update_user_module_package_to_filename_cache, 0, [ 'uc' ] ],
+  'check' => [ \$check_package_vs_filename_consistency, 0, [ 'check-package-names-vs-filenames' ] ],
+  #
+  # Specify which details to print (only filename is printed by default
+  # unless one or more of the following options are given):
+  #
+  'filename' => [ \$print_filename, 0, 'f' ],
+  'modname' => [ \$print_modname, 0, ['m', 'n', 'p', 'package', 'module' ] ],
+  'version' => [ \$print_version, 0, ['v', 'ver' ] ],
+  'format' => [ \$print_format, OPTION_VALUE_REQUIRED, ['fmt'] ],
+  #
+  # Specify Perl version and control Showing or skipping missing modules:
+  #
+  'perlver' => [ \$perl_version, OPTION_VALUE_REQUIRED, ['pver', 'pv' ] ],
+  'path' => [ \@search_path_list, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, ['I', 'P'] ],
+  'sysonly' => [ \$only_include_system_dirs, 0, ['sys', 'so', 'os'] ],
+  'useronly' => [ \$only_include_user_dirs, 0, ['user', 'uo', 'ou'] ],
+  'warn' => [ \$show_warnings, 0, ['w'] ],
+  'show-missing' => [ \$show_missing_modules_too, 0, [ 'M' ] ],
+  'missing-only' => [ \$show_only_missing_modules, 0, [ 'uninstalled', 'u', 'x' ] ],
+  #
+  # Input and output sources, destinations and formats:
+  #
+  'stdin' => \$read_module_names_from_stdin,
+  'fully-qualified-names-in-tree' => [ \$print_fully_qualified_namespace_in_tree, 0, [ 'fullname', 'fullns' ] ],
+  'shorten-search-paths' => [ \$shorten_search_paths, 0, ['shortpath', 'shortpaths', 'shorten-search-path', 'short', 'ssp'] ],
+  'force-colorize' => [ \$force_colorize, 0, ['colorize', 'color', 'force-color' ] ],
+  'quiet' => [ \$quiet, 0, ['q'] ],
+  #
+  # Flags for parse_and_check_command_line() (not actually options)
+  #
+  '.arguments_required' => 1,
+);
+
+#-----------------------------------------------------------------------------
+# find_perl_module($name, @path):
+#
+# Find the .pm file of the specified fully qualified module name in the
+# current @INC path, or in the list specified by the second argument.
+#-----------------------------------------------------------------------------
+
+# Don't be fooled by symlinks to redundant dirs:
+my %filename_to_package = ( );
+
+my %package_to_filename = ( );
+my %package_to_version = ( );
+
+sub lookup_or_find_perl_module($;+) {
+  my ($package, $pathlist) = @_;
+  $pathlist //= \@search_path_list;
+
+  my $filename = $package_to_filename{$package};
+
+  if (exists $package_to_filename{$package}) {
+    return (is_array_ref($filename) ? $filename->[0] : $filename);
+  }
+
+  $filename = find_perl_module($package, $pathlist);
+
+  $package_to_filename{$package} = $filename;
+  return $filename;
+}
+
+my $perl_package_decl_re = qr{^ package \s++ ([\w\_\:]++) \s*+ ;}oamsx;
+
+my $perl_mod_version_decl_re = 
+  qr{\bVERSION \s*+ \= \s*+
+     (?> (?: \$ \w+ ->)? \w+ \s* \( \s*)?
+     (?|
+       (?> ' ([^']++) ') |
+       (?> " ([^"]++) ")
+     )
+  }oamsx;
+
+#-----------------------------------------------------------------------------
+# get_module_name_and_version($code):
+#
+# Given the source code from a module's .pm file, return the package name and
+# the module's version declaration (if present)
+#-----------------------------------------------------------------------------
+#sub get_module_name_and_version($) {
+#  my ($code) = @_;
+#
+#  my ($version) = ($code =~ /$perl_mod_version_decl_re/oamsx);
+#
+#  my @packages = ( );
+#  while ($code =~ /$perl_package_decl_re/oamsxg) { push @packages, $1; }
+#
+#  return ($package, $version // '0');
+#}
+
+my $perl_code_or_pod_doc_section_re = 
+  qr{(?|
+       (?: 
+         ^ = (\w++) \s*+ ([^\n]*) \n
+         (((?! ^ =cut) [^\n]* \n)*+)
+         =cut \n
+       )
+     )}oamsx;
+
+my $perl_comment_re = qr{\# ([^\n]++) \n}oamsx;
+
+my $perl_sigil_and_identifier_re = 
+  qr{($perl_sigil_re)($perl_identifier_re)}oamsx;
+
+my $double_colon_re = qr{\:\:}oax;
+my $double_colon = double_colon;
+
+use constant {
+  orange_fg => fg_color_rgb(255, 204, 0),
+  dark_orange_fg => fg_color_rgb(170, 140, 0),
+  red_orange_fg => fg_color_rgb(255, 140, 0),
+};
+
+my $module_package_namespaces_re = qr{^((?: \w+ ::)*) (\w+)$}oax;
+
+sub format_module_package_name($;$$) {
+  my ($name, $color, $leading_namespaces_color) = @_;
+  $color //= Y;
+  $leading_namespaces_color //= $color;
+
+  return '' if (!defined $name);
+
+  my ($leading_namespaces, $final_package) = ($name =~ /$module_package_namespaces_re/oax);
+  $leading_namespaces =~ s{$double_colon_re}{$double_colon}oaxg;
+
+  my $double_colon = red_orange_fg.double_colon.$leading_namespaces_color;
+  return $leading_namespaces_color.$leading_namespaces.$color.$final_package.$X;
+}
+
+sub format_module_filename($;$) {
+  my ($path, $colorize) = @_;
+
+  my ($dir, $basename, $suffix) = split_path($path);
+  $colorize //= (defined $show_tree) ? 1 : 0;
+  my $sep = $dir_sep_color.large_right_slash.$dir_component_color;
+  my ($search_path, $subdir);
+
+  ($search_path, $subdir) = ($dir =~ /$search_path_list_re/oax);
+  if (is_there($search_path) && $shorten_search_paths) { 
+    $search_path = normalize_trailing_slash($search_path); 
+    my $short = $search_path_to_short_name{$search_path};
+    if (defined $short) { 
+      $search_path = ($colorize)
+        ? double_left_angle_bracket.$short.double_right_angle_bracket.$sep 
+          : '{'.$short.'}/';
+    }
+  }
+
+  if ($colorize) { $dir =~ s{/}{$sep}oaxg; }
+
+  return (
+    ($colorize)
+      ? $shortened_search_path_color.$search_path.$dir_component_color.$subdir.$G.$basename.$Y.$suffix
+      : $search_path.$subdir.$basename.$suffix);
+}
+
+my @pod_chunk_level_to_label_format = (
+  $C,
+  $G,
+  $Y,
+  $M, 
+  # all other pod commands just continue the previous box
+);
+
+#-----------------------------------------------------------------------------
+# format_pod_chunk($text, $label, $level):
+#
+# Format the specified pod format documentation within a .pm file as a series
+# of folder tabs containing the respective text sections
+#-----------------------------------------------------------------------------
+sub format_pod_chunk($;$) {
+  my ($text, $label, $level) = @_;
+  if (!defined $text) { return undef; }
+  $level //= 0;
+  $text =~ s{^\s*+}{}oamsx;
+  $text =~ s{\s*+$}{}oamsx;
+
+  if (defined $label) {
+    my $alignment = ($level < 3) ? ALIGN_CENTER : ALIGN_LEFT;
+    my $flags = ($level > 1) ? TAB_ONE_LINE_OVERLAY_LABEL : 0;
+
+    return print_folder_tab($label, $pod_chunk_level_to_label_format[$level], $alignment, undef, undef, $flags)
+  } else { 
+    return $B.(dashed_horiz_bar_2_dashes x (get_terminal_width_in_columns() - 2)).NL;
+  }
+}
+
+if (0) {
+my $perl_syntax_highlighting_re = 
+  qr{(
+       (?: $perl_comment_re (*:COMMENT)) | 
+       (?: $perl_keywords_and_built_in_functions_re (*:KEYWORD)) |
+       (?: $perl_sigil_and_identifier_re (*:IDENT)) |
+       (?: $perl_string_re (*:STRING)) |
+       (?: [\`\~\!\@\#\$\%\^\&\-\+\=\|\\\;\:\,\<\.\>\/\?]++ (*:OP)) |
+       (?: [\{\}\(\)\[\]]++ (*:STRUCTURAL))
+     )}oamsx;
+}
+
+#-----------------------------------------------------------------------------
+# print_perl_module_source($code):
+#
+# Print the specified perl code with colorized syntax highlighting
+#-----------------------------------------------------------------------------
+sub print_perl_module_source($) {
+  local $outfd = open_scrollable_stream() // STDOUT;
+  print($outfd $_[0]);
+  close($outfd);
+  return 0;
+
+  my $out = '';
+
+  my $pod_chunk = undef;
+  my $pod_chunk_tab_label = undef;
+  
+  my $max_width = get_terminal_width_in_columns() - 6;
+  
+  foreach (split /\n/oax, $_[0]) {
+    if ((length $_) > $max_width) { $_ = substr($_, 0, $max_width); }
+    if (/^ = (head\d+) \s* ([^\n]*) $/oax) {
+      my ($pod_chunk_type, $pod_chunk_label) = ($1, $2);
+      $out .= format_pod_chunk($pod_chunk, $pod_chunk_tab_label);
+      $pod_chunk_tab_label = 
+        ($pod_chunk_level_to_label_format[$pod_chunk_type] // $B).
+        $pod_chunk_label.$X.NL;
+      $pod_chunk = '';
+      # are we resuming the normal code?
+    } elsif (/^ =cut $/oax) {
+      $out .= format_pod_chunk($pod_chunk, $pod_chunk_tab_label);
+      $pod_chunk = undef;
+    } else {
+      if (defined $pod_chunk) {
+        $pod_chunk .= $K.$_.NL;
+      } else {
+        # normal perl code:
+        #s{($perl_keywords_and_built_in_functions_re)}{$W$1$G}oamsxg;
+        s{$perl_comment_re}{$K\#$1$X}oamsxg;
+        #$line =~ s{($perl_string_re)}{$C$1$X}oamsxg;
+        #$line =~ s{$perl_sigil_and_identifier_re}{$Y$1$X}oamsxg;
+        $out .= $G.$_.NL;
+      }
+    }
+  }
+
+  $out .= format_pod_chunk($pod_chunk, $pod_chunk_tab_label);
+}
+
+sub update_module_package_to_filename_cache($) {
+  my ($cachedir) = @_;
+
+  foreach my $package (sort keys %package_to_filename) {
+    my $filenames = $package_to_filename{$package};
+    next if (is_array_ref($filenames) && (scalar(@$filenames) != 1));
+
+    my $filename = (is_array_ref($filenames)) ? $filenames->[0] : $filenames;
+    $filename = realpath($filename);
+
+    my $symlinkname = $cachedir.'/'.($package =~ s{::}{/}roaxg).'.pm';
+
+    mkdirs(directory_of($symlinkname));
+    print("mkdirs(".directory_of($symlinkname).") => symlink($filename, $symlinkname)\n");
+
+    symlink($filename, $symlinkname) 
+      || warn("update_module_package_to_filename_cache: Cannot create symlink from $filename to $symlinkname");
+  }
+}
+
+sub build_filename_tree() {
+  my $treeroot = [[ 
+    [ TREE_CMD_SYMBOL, Y.large_square_root_symbol ],
+    R.U.'Module Files (*.pm)'.UX.
+      ' (found '.Y.sizeof(@filenames).R.' files):'
+  ]];
+
+  foreach my $filename (@filenames) {
+    my $packages = $filename_to_package{$filename} // [ ];
+    my $node = [ ];
+    my $formatted_filename = format_module_filename($filename, 1);
+    
+    if ((scalar @$packages) > 0) {
+      push @$node, [
+        [ TREE_CMD_SYMBOL, $G.dice_5_dots ],
+        $formatted_filename,
+        $K.' ('.$C.(scalar @$packages).$B.' packages'.$K.'):'.$X,
+      ];
+    } else {
+      push @$node, [
+        [ TREE_CMD_SYMBOL, $R.x_symbol ],
+        $formatted_filename,
+        $K.' ('.$R.'no package declarations!'.$K.')'.$X,
+      ];
+    }
+    
+    foreach my $package (@$packages) {
+      push @$node, [[
+        [ TREE_CMD_SYMBOL, red_orange_fg.p_in_circle.' ' ],
+        format_module_package_name($package, $Y, $C),
+      ]];
+    }
+    
+    push @$treeroot, $node;
+  }
+
+  return $treeroot;
+}
+
+sub build_module_package_tree() {
+  my $treeroot = [[ 
+    [ TREE_CMD_SYMBOL, Y.large_square_root_symbol ],
+    R.U.'Module Packages'.UX.
+      ' (found '.Y.sizeof(%package_to_filename).R.' packages):'
+  ]];
+
+  foreach my $package (sort keys %package_to_filename) {
+    my $filenames_comprising_package = $package_to_filename{$package} // [ ];
+    
+    if (!is_array_ref($filenames_comprising_package)) 
+      { $filenames_comprising_package = [ $filenames_comprising_package ]; }
+    
+    my $node = [
+      [
+        [ TREE_CMD_SYMBOL, red_orange_fg.p_in_circle ],
+        $Y.format_module_package_name($package, $Y).
+          $K.' ('.$B.'declared in '.$C.(scalar @$filenames_comprising_package).
+            $B.' .pm module files'.$K.'):'.$X,
+      ],
+    ];
+    
+    foreach my $filename (@$filenames_comprising_package) {
+      push @$node, [[
+        [ TREE_CMD_SYMBOL, $G.dice_5_dots ],
+        $G.format_module_filename($filename, 1),
+      ]];
+    }
+    
+    push @$treeroot, $node;
+  }
+
+  return $treeroot;
+}
+
+my $last_package_namespace_component_re = qr{(?: ::)? (\w+) $}oax;
+
+sub build_namespace_tree() {
+  my $packages = [ sort keys %package_to_filename ];
+  my $path_to_metadata = { };
+
+  foreach my $package (@$packages) {
+    my ($last_package_component) = ($package =~ /$last_package_namespace_component_re/oax);
+    my $name = ($print_fully_qualified_namespace_in_tree) 
+      ? format_module_package_name($package, Y, Y_1_2) 
+      : $last_package_component;
+
+    my $metadata = Y.$name.TAB;
+
+    my $version = $package_to_version{$package};
+    $metadata .= ((defined $version) ? M_3_4.'v'.M.$version : '').TAB;
+
+    my $filenames = $package_to_filename{$package};
+
+    $filenames = format_module_filename($filenames, 1);
+
+    $metadata .= C.$filenames.TAB;
+
+    $path_to_metadata->{$package} = $metadata;
+  }
+
+  my $tree_of_hashes = delimited_paths_to_tree_of_hashes($packages, '::', $path_to_metadata);
+  my $printable_tree = tree_of_hashes_to_printable_tree(
+    $tree_of_hashes, R.U.'Module package namespaces'.UX.
+      ' (found '.Y.sizeof(%package_to_filename).R.' packages):');
+  return $printable_tree;
+}
+
+sub print_fields(+$) {
+  my ($modules_to_query, $print_format) = @_;
+
+  my @out = ( );
+
+  if (!defined $print_format) {
+    if ((defined $print_filename) || (defined $print_modname) || (defined $print_version)) {
+      # one or more of the printable fields are selected: only print those fields, and disable all others
+      $print_filename //= 0;
+      $print_modname //= 0;
+      $print_version //= 0;
+    } else {
+      $print_filename = 1;
+      $print_modname = 0;
+      $print_version = 0;
+    }
+    
+    
+    $print_format = '';
+    append_with_sep($print_format, '%m', TAB) if ($print_modname);
+    append_with_sep($print_format, '%f', TAB) if ($print_filename);
+    append_with_sep($print_format, '%v', TAB) if ($print_version);
+  }
+
+  my $found = 0;
+  my $filename;
+  my $formatted_filename;
+  my $modname;
+  my $modname_from_source;
+  my $version;
+  my $code;
+  
+  my %placeholder_to_var_ref = (
+    'f' => \$formatted_filename,
+    'filename' => \$filename,
+    'm' => \$modname,
+    'p' => \$modname,
+    'mod' => \$modname,
+    'module' => \$modname,
+    'pkg' => \$modname,
+    'package' => \$modname,
+    'ms' => \$modname_from_source,
+    'ps' => \$modname_from_source,
+    'v' => \$version,
+    'ver' => \$version,
+    'c' => \$code,
+    's' => \$code,
+    'code' => \$code,
+    'source' => \$code,
+  );
+  
+  my $has_print_code_placeholder |= ($print_format =~ /(?! \\) % (?: [cs] | (?: \{ (?: code|source) \}))/oax);
+    
+  foreach my $m (@$modules_to_query) {
+    $modname = $m;
+    $filename = $package_to_filename{$modname};
+    
+    if (!defined $filename) {
+      if ($show_missing_modules_too) { print($R.$modname.$K.' <not found>'.$X.NL); }
+      next;
+    }
+    
+    $formatted_filename = ($shorten_search_paths || $force_colorize) 
+      ? format_module_filename($filename, $force_colorize) : $filename;
+
+    $modname_from_source = $filename_to_package{$filename};
+    $version = $package_to_version{$modname_from_source} // 'unknown';
+    
+    # if ($show_only_missing_modules) { next; }
+    
+    $code = ($print_code || $has_print_code_placeholder) ? read_file($filename) : undef;
+    
+    push @out, substitute_placeholders($print_format, %placeholder_to_var_ref);
+    
+    if ($print_code) {
+      print_perl_module_source($code);
+    }
+    
+    $found++;
+  }
+  
+  print(format_delimited_columns([ sort @out ], TAB));
+  
+  return ((scalar @$modules_to_query) - $found);
+}
+
+my %tree_type_to_builder_func = (
+  TREE_TRUNK_FILENAMES, \&build_filename_tree,
+  TREE_TRUNK_MODULE_PACKAGES, \&build_module_package_tree,
+  TREE_TRUNK_NAMESPACES, \&build_namespace_tree
+);
+
+#
+# Main program:
+#
+
+my ($requested_modnames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV);
+
+#
+# Update @search_path_list to reflect the selected Perl version:
+#
+
+my $current_perl_version = sprintf('%vd', $^V);
+
+$perl_version //= $current_perl_version;
+
+if ($perl_version ne $current_perl_version) {
+  my $quoted_ver = quotemeta($current_perl_version);
+  my $replace_ver_re = qr{/ \K $quoted_ver (?= /|\Z)}oax;
+
+  foreach my $path (@search_path_list) {
+    $path =~ s{$replace_ver_re}{$perl_version}oaxg;
+  }
+}
+
+#
+# Pre-process the module search paths 
+# (normally $ENV{PERLLIB} // $ENV{PERL5LIB} // @INC):
+# 
+
+remove_dups_in_place(@search_path_list);
+
+foreach $path (@search_path_list) {
+  my $is_sys_dir = ($path =~ m{^/usr/lib\w*+/perl\d+/}oax);
+  if (($is_sys_dir && $only_include_user_dirs) || 
+        ((!$is_sys_dir) && $only_include_system_dirs)) { $path = undef; }
+}
+
+remove_undefs_in_place(@search_path_list);
+
+$search_path_list_re = '^((?>'.generate_regexp_to_match_any_string_in_list(@search_path_list).')/)(.*)$';
+$search_path_list_re = qr{$search_path_list_re}oax;
+
+#
+# Prepare the mappings from search paths to their symbolic short names:
+#
+
+$shorten_search_paths //= (defined $show_tree) ? 1 : 0;
+
+my @short_name_keys = qw(privlib archlib vendorlib vendorarch sitelib sitearch); 
+%search_path_to_short_name = map { normalize_trailing_slash($Config{$_}) => $_ } @short_name_keys;
+
+my $perl_libs_base_dir = (($Config{sitelib_stem} // '/usr/lib/perl5/site_perl') =~ s{/site_perl$}{}roax).'/';
+$search_path_to_short_name{$perl_libs_base_dir} = 'perllibs';
+
+#
+# Set default target directories for the module name cache:
+#
+
+if ($update_system_module_package_to_filename_cache) 
+  { push @update_module_package_to_filename_caches, '/usr/lib/perl5/cache/'.$perl_version; }
+
+if ($update_user_module_package_to_filename_cache)
+  { push @update_module_package_to_filename_caches, get_home_directory().'/.perl/cache/'.$perl_version; }
+
+if ($read_module_names_from_stdin) {
+  while (<STDIN>) {
+    chomp;
+    push @$requested_modnames, $_;
+  }
+}
+
+#
+# Set up miscellaneous defaults
+#
+$table_format //= $query_all_modules;
+
+my $files_searched_so_far = 0;
+
+my $pm_or_al_filename_re = qr{\. (?: pm|al) $}oax;
+
+sub filter_pm_or_al_files {
+  my $fullpath = $File::Find::name;
+
+  if (!$quiet) {
+    if (($files_searched_so_far++ & 255) == 0) {
+      print(CR.$B.' '.arrow_head.' '.$Y.'Found '.$C.padstring($files_searched_so_far, -6).$Y.' Perl modules...');
+    }
+  }
+
+  if ($fullpath =~ /$pm_or_al_filename_re/oax) 
+    { $filename_to_package{$fullpath} = [ ]; }
+}
+
+my @filenames = ( );
+
+if ($query_all_modules || ((scalar @update_module_package_to_filename_caches) > 0)) {
+  File::Find::find({wanted => \&filter_pm_or_al_files}, @search_path_list);
+  # note that at this point, only the keys (filenames) are filled in; the 
+  # corresponding hash values (the module package names) are still undef:
+  @filenames = sort keys %filename_to_package;
+
+  if (!$quiet) { print(STDERR CR.$G.' '.checkmark.' '.$Y.'Found '.$C.padstring(scalar @filenames, -6).$Y.' Perl module files'.$X.$ERASE_TO_END_OF_LINE.NL); }
+} else {
+  $quiet = 1;
+  # only query specified module(s):
+  foreach my $modname (@$requested_modnames) {
+    $filename = lookup_or_find_perl_module($modname);
+    next if (!defined $filename);
+    push @filenames, $filename;
+  }
+}
+
+my $files_read_so_far = 0;
+
+foreach my $filename (@filenames) {
+  if (!$quiet) {
+    if (($files_read_so_far++ & 255) == 0) {
+      print(STDERR CR.$B.' '.arrow_head.' '.$Y.'Read '.$C.padstring($files_read_so_far, -6).$Y.' out of '.
+              $C.padstring($files_searched_so_far, -6).$Y.' Perl module files');
+    }
+  }
+
+  my $code = read_file($filename);
+  if (!defined $code) {
+    simple_warning('Could not read Perl module '.format_quoted($filename));
+    next;
+  }
+  
+  my ($version) = ($code =~ /$perl_mod_version_decl_re/oamsx);
+
+  my @packages = ( );
+  while ($code =~ /$perl_package_decl_re/oamsxg) { push @packages, $1; }
+
+  next if (!sizeof(@packages));
+  
+  push @$modnames, @packages;
+  append_to_hash_of_arrays_or_scalars(%filename_to_package, $filename, @packages);
+  foreach my $package (@packages) { 
+    append_to_hash_of_arrays_or_scalars(%package_to_filename, $package, $filename);
+    $package_to_version{$package} = $version;
+  }
+}
+
+if (!$quiet) {
+  print(STDERR CR.$G.' '.checkmark.' '.$Y.'Processed '.$C.padstring($files_read_so_far, -6).$Y.' Perl module files'.$X.$ERASE_TO_END_OF_LINE.NL);
+  print(STDERR $K.' '.dot.' '.$C.padstring(scalar keys %filename_to_package, -6).$X.' files'.NL);
+  print(STDERR $K.' '.dot.' '.$C.padstring(scalar keys %package_to_filename, -6).$X.' packages'.NL);
+  print(STDERR $K.' '.dot.' '.$C.padstring(scalar keys %package_to_version, -6).$X.' versioned modules'.NL);
+}
+
+my $rc = 0;
+
+if (defined $show_tree) {
+  my $builder = $tree_type_to_builder_func{$show_tree};
+  die if (!defined $builder);
+
+  my $treeroot = $builder->();
+  print_tree($treeroot);
+} elsif ($show_include_path) {
+  print(join(NL, @search_path_list));
+} elsif ($show_system_lib_dirs) {
+  print_columns(STDOUT, invert_hash(%search_path_to_short_name), ' => ', '');
+} elsif ((scalar @update_module_package_to_filename_caches) > 0) {
+  foreach my $cachedir (@update_module_package_to_filename_caches) {
+    update_module_package_to_filename_cache($cachedir);
+  }
+} elsif ($check_package_vs_filename_consistency) {
+  my @files_without_declared_package = ( );
+  my @files_declaring_multiple_packages = ( );
+
+  foreach my $filename (@filenames) {
+    my $packages = $filename_to_package{$filename};
+    if (!defined $packages) { push @files_without_declared_package, $filename; next; }
+    if (is_array_ref($packages)) {
+      push @files_declaring_multiple_packages, $filename;
+    } else {
+      $packages = [ $packages ];
+    }
+
+    foreach my $package (@$packages) {
+      my $rev_filename = $package_to_filename{$package};    
+    }
+  }
+} else {
+  my $missing = print_fields(($query_all_modules) ? $modnames : $requested_modnames, $print_format);
+  $rc = ($missing > 0) ? 255 : 0;
+}
+
+exit $rc;

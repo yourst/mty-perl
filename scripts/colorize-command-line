@@ -1,0 +1,60 @@
+#!/usr/bin/perl
+#
+# Colorize make output, errors and warning messages
+#
+# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+#
+
+use Cwd 'realpath';
+use File::Basename 'dirname';
+
+#! autoimport {
+#! } # (end autoimport)
+
+# Note: gcc now uses Unicode quotes if LANG=en_US.UTF-8, so use the UTF-8 encodings of these,
+# or simply disable UTF-8 to use regular "'" quotes:
+#$LEFTQUOTE = "\x{e28098}"
+#$RIGHTQUOTE = "\x{e28099}"
+#$ENV{'LANG'} =~ s/\.UTF-8//g;
+
+# Get the terminal type. 
+$terminal = $ENV{'TERM'} || 'dumb';
+
+# If it's in the list of terminal types not to color, or if
+# we're writing to something that's not a tty, don't do color.
+if (! -t STDERR || ($terminal eq 'dumb')) {
+  while (<STDIN>) { print(STDERR $_); }
+  exit 0;
+}
+
+while (<STDIN>) {
+  chomp;
+  my $out;
+
+  # C++ style '//' "comments" some makefiles print for each new phase of the build:
+  s|//\s*(.*)$|${BLUE}// ${GREEN}$1${NOCOLOR}|g;
+  # Action indicator used by e.g. Linux kernel (and all kbuild based makefiles), etc.
+  s/^\s+(\S+)\h/  ${UNDERLINED}${GREEN}$1${NOCOLOR}${NOSTYLE}\t/g;
+  # Errors and warnings:
+  s/(ERROR:|[Ee]rror:)/${RED}$1{$NOCOLOR}/g;
+  s/(WARNING:|[Ww]arning:)/${MAGENTA}$1{$NOCOLOR}/g;
+  # Lines indicating commands make is running (if enabled by e.g. V=1):
+  s/^(\S+)\s+(.*)$/${UNDERLINED}${GREEN}$1${NOCOLOR}${NOSTYLE} $2/g;
+  s/\|\s+(\S+)\s+/${BLUE}${REVERSE} | ${NOCOLOR}${NOSTYLE} \\\n${UNDERLINED}${GREEN}$1${NOCOLOR}${NOSTYLE} /g;
+
+  s{(".*?")}{$s = $1; $s =~ tr/ /\ /; $s;}ge;
+  s/(?<=\s)(-I\S+)(?=\s+)/${CYAN}$1${NOCOLOR}/g;
+  s/(?<=\s)-D(\w+)(?=\s+)/${MAGENTA}-D$1${NOCOLOR}/g;
+  s/(?<=\s)-D(\w+)=(?!\")(\S+)(?=\s+)/${MAGENTA}-D$1=$2${NOCOLOR}/g;
+  s/(?<=\s)-D(\w+)="(.+?)"(?=\s+)/${MAGENTA}-D$1=${BLUE}"$2"${NOCOLOR}/g;
+  s/(?<=\s)(-f\S+)(?=\s+)/${YELLOW}$1${NOCOLOR}/g;
+  s/(?<=\s)(-m\S+)(?=\s+)/${GREEN}$1${NOCOLOR}/g;
+  s/(?<=\s)(-W\S+)(?=\s+)/${RED}$1${NOCOLOR}/g;
+  s/(".*?")/${BLUE}$1${NOCOLOR}/g;
+# s/(?<=\s)(-(?:W\S+|\S*error\S*))(?=\s+)/${RED}$1${NOCOLOR}/g;
+# s/(\s+(\-I.+?)\s+)/${CYAN}$1${NOCOLOR}/g;
+
+  print("$_\n");
+}
+
+exit 0;

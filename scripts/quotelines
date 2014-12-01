@@ -1,0 +1,9 @@
+#!/usr/bin/perl -w
+
+my $special_shell_chars_re = qr/[\'\"\$\!\`\ \*\?\&\|\~\#\(\)\{\}\[\]\<\>\\]/oa;
+
+while (<>) {
+  chomp;
+  s{($special_shell_chars_re)}{\\$1}oaxg;
+  print($_."\n"); 
+}

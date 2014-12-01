@@ -1,0 +1,123 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# nocolor: remove ANSI console color and formatting escape codes 
+# from any text read from stdin, and write the stripped (and thus
+# colorless) version to stdout
+#
+# Copyright 2003-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+#
+
+use integer; use warnings;
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Filesystem::Files;
+use MTY::Common::Strings;
+use MTY::RegExp::Define;
+use MTY::Display::Colorize;
+use MTY::Display::ColorCapabilityCheck;
+use MTY::Display::ANSIColorREs;
+use MTY::Display::PrintableSymbols;
+use MTY::RegExp::Strings;
+use IPC::Open3;
+
+my $strip_color_codes = 1;
+my $is_conditional_on_fd = undef;
+my $replace_utf8_with = undef;
+my $show_color_codes = 0;
+my $show_color_codes_without_pretty_printing = 0; 
+
+if ($0 =~ /nocolor-(?:cond|if)$/oax) { $is_conditional_on_fd = 1; }
+
+my $rest_are_args_for_program = 0;
+my $program_to_exec = undef;
+my @args_for_program = ( );
+
+foreach $arg (@ARGV) {
+  if ($rest_are_args_for_program) {
+    push @args_for_program,$arg;
+  } elsif ($arg =~ /^-c (?:ond)? (?: = (?: (\d+) | (stdout|stderr)))?/oax) {
+    $is_conditional_on_fd = 
+      (defined $2) ? (($2 eq 'stdout') ? STDOUT_FD : STDERR_FD) :
+      (defined $1) ? $1 : STDOUT_FD; # (check stdout by default)
+  } elsif ($arg =~ /^-(no-)?u(?:tf8)? (?: = (\w*))?/oax) {
+    $replace_utf8_with = (($1 // '') eq 'no-') ? '' : ($2 // ' ');
+  } elsif ($arg =~ /^-s(?:how)? (-(?:raw|straight|non-fancy|simple))? (?:-codes)?/oax) {
+    $strip_color_codes = 0;
+    $show_color_codes = 1;
+    $show_color_codes_without_pretty_printing = (is_there($1) ? 1 : 0);
+  } elsif ($arg !~ /^-/oax) {
+    $program_to_exec = $arg;
+    $rest_are_args_for_program = 1;
+  } else {
+    print(STDERR "$0: warning: unknown option '$arg'\n");
+  }
+}
+
+if (defined $is_conditional_on_fd) {
+  my $fd = $is_conditional_on_fd;
+  $fd = ($fd == STDOUT_FD) ? STDOUT : ($fd == STDERR_FD) ? STDERR : undef;
+  if (is_filehandle_color_capable($fd)) { $strip_color_codes = 0; }
+}
+
+use constant DEBUG => 0;
+
+if (DEBUG) {
+  print(STDERR '$0 = '.$0.NL);
+  print(STDERR 'is_conditional_on_fd = '.($is_conditional_on_fd // '<undef>').NL);
+  print(STDERR 'strip_color_codes = '.$strip_color_codes.NL);
+  print(STDERR 'replace_utf8_with = '.($replace_utf8_with // '(leave in place)').NL);
+  print(STDERR '$program_to_exec = '.($program_to_exec // '<none - use stdin>').NL);
+  print(STDERR 'args_for_program = '.join(' ', @args_for_program).NL);
+}
+
+my $executed_pid = undef;
+
+my $fd;
+
+if (defined $program_to_exec) {
+  $executed_pid = open3('<&STDIN', \*FD, '>&STDERR', $program_to_exec, @args_for_program);
+  $fd = FD;
+} else {
+  $fd = STDIN;
+}
+
+sub decode_ansi_color_code($) {
+  my ($orig) = @_;
+
+  # return G_1_2.'<'.$c.'>'.X;
+  # return G_1_2.bold_left_angle_bracket.$G.$c.G_1_2.bold_right_angle_bracket.X;
+  if ($show_color_codes_without_pretty_printing) {
+    my $c = ($orig =~ s{[\e\x9B\007]}{<ESC>}roaxg);
+    return $c;
+  } else {
+    my $c = ($orig =~ s{[\[\e\x9B\007]}{}roaxg =~ s{m$}{}roaxg);
+    return R.left_angle_quote.Y.$c.R.right_angle_quote.X;
+  }
+
+  # return R.U.$c.X;
+  # return '<<'.$c.'>>';
+}
+
+binmode STDOUT,':utf8' if (!defined $replace_utf8_with);
+
+if ($strip_color_codes || $show_color_codes || (defined $replace_utf8_with)) {
+  while (<$fd>) {
+    if ($strip_color_codes) { s{$ansi_console_escape_codes_re}{}oamsxg; }
+    if ($show_color_codes) { s{($ansi_console_escape_codes_re)}{decode_ansi_color_code($1)}oamsxge; }
+    if (defined $replace_utf8_with) { s/$utf8_re/$replace_utf8_with/oamsxg; }
+    print(STDOUT $_);
+  }
+} else {
+  while (<$fd>) { print(STDOUT $_); }
+}
+
+my $rc = 0;
+
+if (defined $executed_pid) {
+  waitpid($executed_pid, 0);
+  $rc = ($? >> 8);
+}
+
+exit ($rc);

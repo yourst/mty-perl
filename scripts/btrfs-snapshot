@@ -1,0 +1,240 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+
+use integer; use warnings;
+
+use MTY::Common::Common;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Filesystem::FileStats;
+use MTY::Common::CommandLine;
+
+use MTY::Display::Colorize;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::TextInABox;
+use MTY::Display::Tree;
+use MTY::Display::PrintableSymbols;
+use MTY::Display::PrintableSymbolTools;
+
+use MTY::RegExp::Define;
+use MTY::RegExp::Tools;
+use MTY::RegExp::Blocks;
+use MTY::RegExp::Numeric;
+use MTY::RegExp::Strings;
+use MTY::RegExp::FilesAndPaths;
+
+use MTY::System::POSIX;
+use MTY::Filesystem::ExtAttrs;
+use MTY::Filesystem::BtrFS;
+use MTY::Filesystem::ProcFS;
+use MTY::Filesystem::Mounts;
+use MTY::System::Misc;
+
+my $max_backup_count = 0;
+my $fs_root = undef;
+my $subvolume = undef;
+my $snapshot_name = undef;
+my $force_create_snapshots_dir = 0;
+my $delete_snapshot = undef;
+
+my %command_line_options = (
+  'backups' => [ \$max_backup_count, OPTION_VALUE_REQUIRED, [ 'n' ] ],
+  'backup' => [ \$max_backup_count, OPTION_ASSIGN_BOOL, [ 'b' ], 1, 0 ],
+  'force' => [ \$force_create_snapshots_dir, 0, [ 'f' ] ],
+  'subvolume' => [ \$subvolume, OPTION_VALUE_REQUIRED, [ 'subvol', 'sub', 'volume', 'vol', 'v' ] ],
+  'snapshot' => [ \$snapshot_name, OPTION_VALUE_REQUIRED, [ 'ss', 's' ] ],
+  'delete' => [ \$delete_snapshot, OPTION_VALUE_REQUIRED, [ 'd', 'del', 'destroy', 'remove', 'rm', 'r' ] ]
+);
+
+sub show_help {
+  my $help =
+    $C.$U.'Syntax:'.$X.NL.
+    NL.
+    '  '.$C.'btrfs-snapshot '.$K.'['.$Y.'-option'.$K.'...] '.
+    $K.'<'.$Y.'/path/of/subvolume'.$K.'> [<'.$G.'SnapshotName'.$K.'>]'.$X.NL.
+    NL.
+    'Creates a snapshot of subvolume '.$Y.'/path/of/subvolume'.$X.' in '.$Y.$U.'/path/of/subvolume'.$UX.$G.'/.snapshots/'.$G.$U.'SnapshotName'.$X.NL.
+    'or if no snapshot name is specified, the current time and date will be used to generate a default'.NL.
+    'snapshot name of the form '.format_quoted($Y.'snapshot-'.$G.'YYYYMMDD-HHMMSS').'.'.NL.
+    NL.
+    $C.$U.'Options:'.$X.NL.
+    NL.
+    $Y.'  -backups '.$G.'N'.$K.':    '.$X.'Assuming the base snapshot name is '.format_quoted($G.'SnapshotName').', '.$Y.'-backups'.$X.' maintains'.NL.
+    '                 a queue of at most '.$G.'N'.$X.' chronologically ordered backups named'.NL.
+    '                 e.g. '.$G.'SnapshotName'.$Y.'.2014-01-01-12:00:00'.$X.' (i.e. using the actual timestamp'.NL.
+    '                 of when that snapshot was created.'.NL.
+    NL.
+    '                 Whenever a new snapshot is created, the oldest snapshot in'.NL.
+    '                 the queue is deleted if N snapshots already exist. The new'.NL.
+    '                 snapshot is then created using the X.datestamp naming scheme'.NL.
+    '                 above, and the base name (e.g. '.format_quoted($G.'SnapshotName').') is then symlinked to '.NL.
+    '                 this newly created snapshot. This approach makes the entire'.NL.
+    '                 process atomic since it never renames subvolumes.'.NL.
+    NL.
+    $Y.'  -backup        '.$X.'Equivalent to '.format_quoted($Y.'-backups 1').NL.
+    NL.
+    $Y.'  -force         '.$X.'If the '.$Y.'/path/of/subvolume/.snapshots'.$X.' directory does not exist,'.NL.
+    '                 it will automatically be created.'.NL.
+    NL.
+    $Y.'  -delete '.$G.'/name'.$K.': '.$X.'Delete the specified snapshot (by its full path name)'.NL.
+    NL;
+
+  print(STDERR $help);
+  exit 1;
+}
+
+sub print_progress($) {
+  print(STDERR $G.' '.checkmark.' '.$_[0].NL);
+}
+
+print(STDERR print_banner($Y.'btrfs-snapshot', $R.'BtrFS snapshot creation, rotation, querying and management utility', $Y).NL);
+
+my ($args, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, \&show_help);
+
+my ($subvolume_arg, $snapshot_name_arg) = @$args;
+
+if (!defined $delete_snapshot) {
+  if ((defined $subvolume_arg) && (defined $subvolume)) 
+    { die("Cannot specify a subvolume name in both the first non-option argumment and the '-subvol' option"); }
+
+  $subvolume //= $subvolume_arg;
+
+  if ((defined $snapshot_name_arg) && (defined $snapshot_name) &&
+        (($snapshot_name_arg // 'default') ne ($snapshot_name // 'default')))
+    { die("Cannot specify a snapshot name in both the first non-option argumment and the '-snapshot' option"); }
+
+  $snapshot_name //= ($snapshot_name_arg // 'default');
+}
+
+if (defined $delete_snapshot) {
+  $snapshot_name = $delete_snapshot;
+  $subvolume = $delete_snapshot;
+} elsif (!defined $subvolume) {
+  # warn("No subvolume name specified.");
+  show_help();
+}
+
+$subvolume = realpath($subvolume);
+$fs_root = find_mount_point($subvolume);
+if (!defined $fs_root) { die('Cannot find mount point for subvolume '.$subvolume); }
+
+if (defined $delete_snapshot) {
+  if (!is_btrfs_subvol_or_root($subvolume)) 
+    { die("'$subvolume' is not a BtrFS subvolume nor a btrfs root directory"); };
+
+  if (!is_btrfs_snapshot($subvolume)) 
+    { die("'$subvolume' is not a BtrFS snapshot"); }
+
+  print_progress($Y.'Deleting snapshot "'.$C.$subvolume.$K.'"...');
+  remove_btrfs_subvol($subvolume) || die("Could not delete snapshot named '$subvolume'");
+  print_progress($Y.'Deleted snapshot "'.$C.$subvolume.$K.'"');
+  exit 0;
+}
+
+if ($fs_root ne '/') { $fs_root =~ s{\K/$}{}oaxg; }
+
+my $timestamp = strftime('%Y.%m.%d-%H.%M.%S', localtime());
+
+# Don't use a redundant leading '/' if snapshotting the root directory:
+my $snapshots_dir = $subvolume.(($subvolume eq '/') ? '' : '/').'.snapshots';
+
+my $target_dir = $snapshots_dir.'/'.$snapshot_name;
+if ($max_backup_count > 0) { $target_dir .= '@'.$timestamp; }
+
+if (! -d $snapshots_dir) {
+  if ($force_create_snapshots_dir) {
+    make_path($snapshots_dir) 
+      || die('Cannot create directory '.$snapshots_dir);
+  } else {
+    print($G.$snapshots_dir.$X.' does not exist: '.
+          'skipping snapshot of subvolume '.$Y.$subvolume.$X.NL);
+    exit 0;
+  }
+}
+
+if (! -d $snapshots_dir) { 
+  die($snapshots_dir.' cannot be created, or already exists but is not a directory');
+}
+
+my $target_dir_filetype = get_file_type($target_dir);
+
+if (defined $target_dir_filetype) {
+  if ($target_dir_filetype == FILE_TYPE_DIR) {
+    remove_btrfs_subvol($target_dir) || die('Failed to remove existing snapshot subvolume directory '.$target_dir);
+    print_progress('Removed old snapshot target directory '.$C.$target_dir);
+  } elsif ($target_dir_filetype == FILE_TYPE_SYMLINK) {
+    # The target is a symlink: just remove it so we can create a subvolume 
+    # directory with the same name (usually this occurs when switching from
+    # simple single snapshot mode to a series of multiple backups)
+    unlink($target_dir) || die('Failed to remove target directory symlink '.$target_dir);
+    print_progress('Removed symlink with same name as target directory '.$C.$target_dir);
+  } else {
+    die('Target directory '.$target_dir.' already exists, but is neither a directory '.NL.
+          'nor a symlink (it appears to be a '.$file_type_to_description{$target_dir_filetype}.')');
+  }
+}
+
+create_btrfs_snapshot($subvolume, $target_dir)
+  || die('Failed to create snapshot of subvolume '.$subvolume.' in target directory '.$target_dir);
+
+print_progress($Y.'Created snapshot'.$K.' of subvolume '.$C.$subvolume.$K.' in new snapshot directory '.$G.$target_dir);
+
+update_subvol_xattrs($target_dir, $fs_root);
+
+print_progress($Y.'Set extended attributes'.$K.' of new snapshot in '.$G.$target_dir.$Y);
+
+set_btrfs_property($target_dir, 'ro', 'true');
+
+print_progress($Y.'Set read only flag'.$K.' on new snapshot in '.$G.$target_dir.$Y);
+
+if ($max_backup_count > 0) {
+  my @existing_snapshots = read_directory($snapshots_dir);
+  
+  my $oldest_gen = 1<<62;
+  my $oldest_snapshot_path = undef;
+  my $existing_snapshot_count = 0;
+
+  foreach $f (@existing_snapshots) {
+    next if ($f =~ /^\./oax); # skip dot files + . and .. dirs
+    next unless (starts_with($f, $snapshot_name.'@'));
+    my $fullname = $snapshots_dir.'/'.$f;
+    my $subvol_info = query_btrfs_subvol($fullname, $fs_root);    
+    my $gen = $subvol_info->{gen};
+    if (!defined $gen) { die('Cannot get generation of '.$fullname); }
+    if ($gen <= $oldest_gen) {
+      $oldest_gen = $gen;
+      $oldest_snapshot_path = $fullname;
+    }
+    $existing_snapshot_count++;
+  }
+
+  print_progress($Y.'Oldest snapshot'.$K.' is '.$G.$oldest_snapshot_path.
+                   $K.' with generation '.$G.$oldest_gen);
+
+  if ($existing_snapshot_count <= $max_backup_count) {
+    print(STDERR $R.' '.x_symbol.' '.$Y.'Skipping removal of oldest snapshot'.$K.
+          ', since there were only '.$G.$existing_snapshot_count.$K.' out of '.
+          $G.$max_backup_count.$K.' snapshots'.$X.NL);
+  } else {
+    remove_btrfs_subvol($oldest_snapshot_path) || 
+      die('Could not remove oldest snapshot "'.$oldest_snapshot_path.'"');
+    print_progress($Y.'Removed oldest snapshot '.$G.$oldest_snapshot_path.
+                     $K.' from generation '.$G.$oldest_gen);
+  }
+
+  my $symlink_path = $snapshots_dir.'/'.$snapshot_name;
+
+  if (-l $symlink_path) { 
+    unlink($symlink_path) 
+      || die('Cannot remove symlink "'.$symlink_path.'"'); 
+  }
+
+  my $relative_target_dir = $snapshot_name.'@'.$timestamp;
+
+  symlink($relative_target_dir, $symlink_path)
+    || die('Cannot symlink '.$target_dir.' to '.$symlink_path);
+
+  print_progress($Y.'Linked '.$G.$target_dir.$K.' to '.$G.$symlink_path);
+}
+
+exit 0;

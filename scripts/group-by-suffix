@@ -1,0 +1,117 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# group-by-suffix: condense long lists of filenames or domain names
+# by finding redundant suffixes and grouping together all prefixes
+# with those suffixes, either as e.g.:
+#
+#   1st.a 2nd.a 3rd.b 4th.b 5th.b    =>  {1st 2nd}.a {3rd 4th 5th}.b
+#
+# or displayed as a tree with one node per suffix and one leaf per prefix.
+#
+# Copyright 2003-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+#
+
+use integer; use warnings;
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Common::CommandLine;
+use MTY::Display::Colorize;
+use MTY::Display::ColorCapabilityCheck;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::PrintableSymbols;
+use MTY::Display::Tree;
+use MTY::RegExp::Define;
+use MTY::RegExp::Tools;
+use MTY::RegExp::Analyzer;
+
+my $fancy_output = is_stdout_color_capable();
+
+my $sep = '.';
+my $suffix_count = undef;
+# my $divider = ($fancy_output) ? dashed_vert_bar_3_dashes : ' ';
+my $divider = ($fancy_output) ? long_narrow_vert_bar : ' ';
+my $bracket_style = '{}';
+my $line_separator = 0; # space by default
+my $split_only = 0;
+my $print_tree = 0;
+my $print_tree_suffixes = 1;
+my $no_color = 0;
+my $read_from_stdin = (! -t 0);
+
+my %command_line_options = (
+  'separator' => [ \$sep, OPTION_VALUE_REQUIRED, ['sep', 's'] ],
+  'suffix-count' => [ \$suffix_count, OPTION_VALUE_REQUIRED, ['n'] ],
+  'divider' => [ \$divider, OPTION_VALUE_REQUIRED, ['p', 'd'] ],
+  'brackets' => [ \$bracket_style, OPTION_VALUE_REQUIRED, ['b'] ],
+  'linesep' => [ \$line_separator, 0, ['l'] ],
+  'split-only' => [ \$split_only, 0, ['o', 'so', 'split'] ],
+  'tree' => [ \$print_tree, 0, ['t'] ],
+  'tree-suffixes' => [ \$print_tree_suffixes, 0, ['ts'] ],
+  'nocolor' => [ \$no_color, 0, ['nc'] ],
+  'stdin' => [ \$read_from_stdin, 0, ['i'] ],
+);
+
+my ($names, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV);
+
+if (!(scalar $names)) { 
+  print_command_line_options_help(%command_line_options);
+  exit(255);
+}
+
+$line_separator = ($line_separator) ? NL : ' ';
+
+if ($no_color) { disable_color(); };
+
+if ($read_from_stdin) {
+  while (<STDIN>) {
+    chomp;
+    push @$names, $_;
+  }
+}
+
+my ($left_bracket_style, $right_bracket_style) = split(//, $bracket_style);
+
+my $suffixes_re = generate_suffix_regexp('.', $suffix_count);
+
+my %suffixes_to_prefix_list = ( );
+
+foreach $name (@$names) {
+  my ($prefix, $suffixes) = split_using_suffix_regexp($name, $suffixes_re);
+
+  if ($split_only) {
+    print($prefix.$divider.$suffixes.$line_separator);
+    next;
+  }
+
+  push @{$suffixes_to_prefix_list{$suffixes}},$prefix;
+}
+
+my @sorted_suffixes = sort keys %suffixes_to_prefix_list;
+
+if ($print_tree) {
+  my $root = [ '' ];
+  foreach $suffix (@sorted_suffixes) {
+    my $added = ($print_tree_suffixes) ? $K.($suffix =~ s{\.}{$K.$B}roaxg) : '';
+    my $suffix_formatted = $suffix =~ s{\.}{$B.$G}roaxg;
+    push @$root, [ $G.$suffix_formatted, (map { $Y.$_.$added } @{$suffixes_to_prefix_list{$suffix}}) ];
+  }
+  print_tree($root);
+} else {
+  my $first = 1;
+  foreach $suffix (@sorted_suffixes) {
+    my $prefix_list = $suffixes_to_prefix_list{$suffix};
+    my $suffix_formatted = $suffix =~ s{\.}{$B.$C}roaxg;
+    print($R.$left_bracket_style.
+          $Y.join($K.$divider.$Y, @$prefix_list).
+          $R.$right_bracket_style.
+          $suffix_formatted.$X.$line_separator);
+  }
+}
+
+if ($line_separator ne NL) { print(NL); }
+
+exit 0;

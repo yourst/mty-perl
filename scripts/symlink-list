@@ -1,0 +1,59 @@
+#!/usr/bin/perl -w
+
+use warnings; no integer;
+
+use MTY::Common::Common;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Common::CommandLine;
+use MTY::RegExp::Strings;
+
+my $reverse_order = 0;
+my $verbose = 0;
+my $dry_run = 0;
+my $preserve_existing_links = 0;
+
+my %command_line_options = (
+  'reverse' => [ \$reverse_order, ['r', 'rev', 'link-then-target'] ],
+  'verbose' => [ \$verbose, ['v'] ],
+  'preserve' => [ \$preserve_existing_links, ['p'] ],
+  'dry-run' => [ \$dry_run, ['dryrun', 'test'] ],
+);
+
+my ($filename_pairs, $invalid_args) = parse_command_line(%command_line_options, @ARGV);
+
+if ($invalid_args) {
+  print_invalid_options($invalid_args);
+  die('Invalid command line arguments');
+}
+
+my $filename_spec_optionally_quoted_or_tab_terminated_re = 
+  qr{(?| 
+       (?: $inside_quoted_re \s*+) | 
+       (?: ([^\t]++) (?: \t|$)) |
+       (?: (\S++) (?: \s|$))
+     )}oax;
+
+my $input_line_re = 
+  qr{^ $filename_spec_optionally_quoted_or_tab_terminated_re \s*+
+       $filename_spec_optionally_quoted_or_tab_terminated_re $}oax;
+
+if (!@$filename_pairs) {
+  while (<STDIN>) {
+    chomp;
+    push @$filename_pairs, $_;
+  }
+}
+
+foreach (@$filename_pairs) {
+  if (/$input_line_re/oax) {
+    my ($from, $to) = (($reverse_order) ? ($2, $1) : ($1, $2));
+    if ((-l $to) && (!$preserve_existing_links)) { unlink($to); }
+    if (!$dry_run) {
+      if (!symlink($from, $to)) { 
+        print(STDERR 'Warning: cannot symlink "'.$from.'" to "'.$to.'" ('.$!.')'.NL); next; 
+      }
+    }
+    if ($verbose) { print($from.' -> '.$to.NL); }
+  }
+}

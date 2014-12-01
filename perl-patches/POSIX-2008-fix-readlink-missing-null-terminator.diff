@@ -1,0 +1,38 @@
+diff -urN -u POSIX-2008-0.03.old/2008.xs POSIX-2008-0.03.new/2008.xs
+--- POSIX-2008-0.03.old/2008.xs	2013-09-16 02:24:09.000000000 -0700
++++ POSIX-2008-0.03.new/2008.xs	2014-06-22 18:36:36.527659194 -0700
+@@ -80,18 +80,29 @@
+         return(NULL);
+ 
+     while (1) {
+-        if (dirfd)
+-            linklen = readlinkat(*dirfd, path, buf, bufsize);
+-        else
+-            linklen = readlink(path, buf, bufsize);
++        linklen = readlinkat((dirfd ? *dirfd : AT_FDCWD), path, buf, bufsize-1);
+ 
+         if (linklen < 0 && errno != ERANGE) { // ERANGE check from coreutils
+             Safefree(buf);
+             return(NULL);
+         }
+ 
+-        if ((size_t)linklen < bufsize || linklen == SSIZE_MAX)
++        if ((size_t)linklen < bufsize || linklen == SSIZE_MAX) {
++             /*
++              * The readlink() and readlinkat() syscalls do *not* add a 
++              * null terminator byte at the end of the buffer, which is
++              * usually desirable since symlinks can in theory contain
++              * literally any characters (including nulls) and should
++              * therefore be treated like the result of a read() syscall
++              * rather than something that normally returns a path.
++              *
++              * However, the perl side of this call assumes the symlink
++              * is a normal string rather than arbitrary bytes, so we
++              * need to null terminate it here:
++              */
++             buf[linklen] = 0;
+             return(buf);
++        }
+ 
+         bufsize <<= 1;
+         bufsize++;

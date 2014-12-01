@@ -1,0 +1,57 @@
+#!/bin/sh
+
+. common.sh
+
+BASEDIR=/mirror/cpan
+cd $BASEDIR || { echo "Cannot find directory $BASEDIR"; exit 2; }
+[ -d readmes ] || { echo "Cannot find directory $BASEDIR/readmes"; exit 3; }
+
+unset PERLREOPTS VERBOSE SEARCHFOR OUT_OF_DATE RUN_MAKE 
+
+for arg in "$@"; do
+  case "$arg" in
+    -v) VERBOSE=1 ;;
+    -make|-remake|-rebuild|-update) RUN_MAKE=1 ;;
+    -*) PERLREOPTS+=" $arg" ;;
+    *) SEARCHFOR=$arg ;;
+  esac
+done
+
+[[ readmes/ -nt metadata/all-readmes ]] && OUT_OF_DATE=1
+
+if [[ $OUT_OF_DATE ]]; then
+  echo 
+  echo "Warning: readmes directory is newer than cache in metadata/all-readmes:"
+  echo "Re-run 'grep-readmes -make' to update it. Using the old cache instead."
+  echo 
+  if [[ $RUN_MAKE ]]; then
+    echo -n "Rebuilding metadata/all-readmes (readmes directory was newer than all-readmes cache file)..."; 
+    mv -f metadata/all-readmes metadata/all-readmes.old
+    make metadata/all-readmes
+    echo "done";
+  fi
+fi
+
+# REGEXP="^%file\s(\N++)\n\x1C[^\x1A]*?${SEARCHFOR}[^\x1A]*+\x1A"
+REGEXP="^%file\s(\N+)\n\x1C.*?${SEARCHFOR}[^\x1A]*\x1A"
+
+FOUND=$(perlre $PERLREOPTS -m "$REGEXP" '$1\n' < metadata/all-readmes)
+
+if [[ $VERBOSE ]]; then
+  cd readmes
+  grep --color=force -H -i -P "$SEARCHFOR" $FOUND
+
+  # for dist in $FOUND; do
+  #   LABEL=${dist//-/%B::%Y}
+  #   text-in-a-box -tab "%Y$LABEL"
+  #   # perlre -s '^\s*+' '' < readmes/$dist | 
+  #   # perlre -color -m -s "($SEARCHFOR)" '$B<$.: $G$U$1$X$B>$X' < readmes/$dist
+  #   grep -i -P "$SEARCHFOR" < readmes/$dist
+  # done
+else
+  for dist in $FOUND; do
+    echo $dist
+  done
+fi
+
+

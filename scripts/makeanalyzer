@@ -1,0 +1,273 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# analyze-make: parse the database of make rules and recipes
+# output of 'make -p' so it can be saved and reloaded to accelerate
+# make's performance on complex collections of many makefiles
+#
+# Copyright 2003-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+#
+
+use integer;
+use warnings;
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Display::Colorize;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::TextInABox;
+use MTY::Display::Tree;
+use MTY::Display::PrintableSymbols;
+
+use MTY::MakeAnalyzer::Common;
+use MTY::MakeAnalyzer::Variable;
+use MTY::MakeAnalyzer::Target;
+use MTY::MakeAnalyzer::MakeDatabaseParser;
+use MTY::MakeAnalyzer::MakefileParser;
+use MTY::MakeAnalyzer::Log;
+
+my $arg_param_list_re = qr/(?: , | \s+)/oax;
+
+my $filename = undef;
+
+# Modes of operation:
+my $print_targets = 0;
+my $print_variables = 0;
+my $print_deps = 0;
+my $dump_for_reload = 0;
+my $analyze_log = 0;
+
+# Additional parameters:
+my $print_summary = 0;
+my $print_details = 0;
+my $skip_empty_vars = 1;
+
+my $auto_path_prefix_substitutions = 1;
+
+#
+# If $target_to_print and/or $variable_to_print is defined, 
+# print only that target and/or variable, respectively; 
+# otherwise print all targets and/or variables:
+#
+my $target_to_print = undef;
+my $variable_to_print = undef;
+my $deps_to_print = undef;
+
+my @target_categories = ( );
+my @variable_categories = ( );
+
+my $next_arg_ref = undef;
+
+my %path_prefix_substitutions = ( );
+
+my @command_line_options = (
+  'all' => [ sub { 
+               $print_targets = 1;
+               $print_variables = 1;
+               $print_deps = 1;
+               $print_summary = 1;
+               $print_details = 1;
+             } ],
+
+  'target' => [ \$target_to_print, OPTION_VALUE_REQUIRED ],
+  'targets' => \$print_targets,
+  't' => 'target',
+
+  'variable' => [ \$variable_to_print, OPTION_VALUE_REQUIRED ],
+  'variables' => \$print_variables,
+  'v' => 'variable',
+  
+  'deps' => [ \$deps_to_print, OPTION_VALUE_REQUIRED ],
+  'alldeps' => \$print_deps,
+  'd' => 'deps',
+
+  'dump' => \$dump_for_reload,
+  'summary' => \$print_summary,
+  'details' => \$print_details,
+  'skip-empty-vars' => \$skip_empty_vars,
+);  
+
+foreach $arg (@ARGV) {
+  if (defined $next_arg_ref) {
+   ${$next_arg_ref} = $arg;
+    $next_arg_ref = undef;
+  } elsif ($arg eq '-all') {
+    $print_targets = 1;
+    $print_variables = 1;
+    $print_deps = 1;
+    $print_summary = 1;
+    $print_details = 1;
+  } elsif ($arg =~ /^-target(s?)/oax) {
+    $print_targets = 1;
+    if ($1 ne 's') { $next_arg_ref = \$target_to_print; }
+  } elsif ($arg =~ /^-variable(s?)/oax) {
+    $print_variables = 1;
+    if ($1 ne 's') { $next_arg_ref = \$variable_to_print; }
+  } elsif ($arg =~ /-((?:all)?)deps?/oax) {
+    $print_deps = 1;
+    if ($1 ne 'all') { $next_arg_ref = \$deps_to_print; }
+  } elsif ($arg eq '-dump') {
+    $dump_for_reload = 1;
+  } elsif ($arg eq '-log') {
+    $analyze_log = 1;
+  } elsif ($arg eq '-summary') {
+    $print_summary = 1;
+  } elsif ($arg eq '-details') {
+    $print_details = 1;
+  } elsif ($arg eq '-(include|skip)-empty-vars') {
+    $skip_empty_vars = ($1 eq 'skip') ? 1 : 0;
+  } elsif ($arg =~ /^-target-categor(?:y|ies) = (.+)/oax) {
+    my $target_category_list = $1;
+    @target_categories = split /,/, $target_category_list;
+  } elsif ($arg =~ /^-var(?:iable)?-categor(?:y|ies) = (.+)/oax) {
+    my $variable_category_list = $1;
+    @variable_categories = split /,/, $variable_category_list;
+  } elsif ($arg =~ /^-exclude-(target|var(?:iable)?)-matching-regexp = (.*)$/oax) {
+    my ($targets_or_vars, $regexp_as_text) = ($1, $2);
+    my $re = qr/$regexp_as_text/oax;
+    if ($targets_or_vars eq 'target') {
+      exclude_make_targets_matching_regexp($re);
+    } elsif ($targets_or_vars eq 'var') {
+      exclude_make_vars_matching_regexp($re);
+    }
+  } elsif ($arg =~ /^-exclude-(target|var) \w* = (.*)$/oax) {
+    my ($targets_or_vars, $list_as_text) = ($1, $2);
+    my @excluded = split(/$arg_param_list_re/oax, $list_as_text);
+    if ($targets_or_vars eq 'target') {
+      exclude_make_targets(@excluded);
+    } elsif ($targets_or_vars eq 'var') {
+      exclude_make_vars(@excluded);
+    }
+  } elsif ($arg =~ /^(?: -(subst|replace|remove))? -path-prefix = ([^,]+) (?: , (.+))?$/oax) {
+    $path_prefix_substitutions{$2} = (is_there($3) ? $3 : '');
+  } elsif ($arg =~ /^-no-path(?:-prefix)?-(?:subst|rep)/oax) {
+    $auto_path_prefix_substitutions = 0;
+  } elsif ($arg =~ /^-/oax) {
+    die("Invalid option '$arg'");
+  } else {
+    if (defined $filename) 
+      { die("Extra argument '$arg' (filename '$filename' already specified)"); }
+    $filename = $arg;
+  }
+}
+
+#
+# Check options and set up default values:
+#
+
+$filename //= '/dev/stdin';
+
+$MTY::MakeAnalyzer::Common::skip_empty_vars = $skip_empty_vars;
+
+if (!($print_summary || $print_details)) {
+  $print_summary = 1;
+  $print_details = 1;
+}
+
+if (!($print_targets || $print_variables || $print_deps || $dump_for_reload || $analyze_log)) {
+  die('$0: must specify at least one of the following modes: '.
+        '-all | -targets | -variables | -alldeps | -deps <target> | -dump | -log');
+}
+
+#
+# Read and parse the make database:
+#
+
+open($fd, '<', $filename) 
+  || die("Cannot open make database dump file '$filename' generated by 'make -p'");
+my ($variables, $targets) = parse_make_database($fd) unless ($analyze_log);
+
+add_implicit_targets_to_target_list($targets);
+
+if ($analyze_log) {
+  my $text = read_file_handle(fileno($fd));
+  print_formatted_make_log($text);
+  exit 0;
+}
+
+close($fd);
+
+my $curdir = strip_trailing_slash(POSIX::getcwd());
+
+if ($auto_path_prefix_substitutions) {
+  create_reverse_map_of_path_variable_values_to_names($variables, \%path_prefix_substitutions);
+  $path_prefix_substitutions{$curdir} = $B.'./'.$G;
+  $path_prefix_substitutions{$curdir.'/'} = $B.'./'.$G;
+} else {
+  %path_prefix_substitutions = { };
+}
+
+prepare_path_prefixes_to_replacements(\%path_prefix_substitutions);
+
+#
+# Print the requested output:
+#
+
+if (defined $target_to_print) {
+  if (!exists $targets->{$target_to_print}) 
+    { die('Target '.$C.$target_to_print.$R.' does not exist!;'); }
+  $target_to_print = $targets->{$target_to_print};
+}
+
+if (defined $variable_to_print) {
+  if (!exists $variables->{$variable_to_print}) 
+    { die('Variable '.$C.$variable_to_print.$R.' does not exist!;'); }
+  $variable_to_print = $variables->{$variable_to_print};
+}
+
+if ($print_summary) {
+  if ($print_targets) { 
+    if (defined $target_to_print) {
+      print_summary_of_target($target_to_print);
+    } else {
+      print_summary_of_targets($targets); 
+    }
+  }
+  if ($print_variables) { 
+    if (defined $variable_to_print) {
+      print_summary_of_variable($variable_to_print);
+    } else {
+      print_summary_of_variables($variables);
+    }
+  }
+}
+
+if ($print_details) {
+  if ($print_targets) { 
+    if (defined $target_to_print) {
+      print_target($target_to_print);
+    } else {
+      print_targets($targets); 
+    }
+  }
+  if ($print_variables) { 
+    if (defined $variable_to_print) {
+      print_variable($variable_to_print);
+    } else {
+      print_variables($variables);
+    }
+  }
+}
+
+if ($print_deps) {
+  my $target_names_to_deps = targets_to_dep_lists($targets);
+  my $target_names = [ sort keys %{$target_names_to_deps} ];
+  my $target_names_to_labels = target_dep_lists_to_printable_tree_labels($targets, $target_names_to_deps, $target_names);
+
+  if (defined $deps_to_print) {
+    print_dependency_tree_from_target_deps_and_labels($targets->{$deps_to_print}, $deps_to_print, $target_names_to_deps, $target_names_to_labels);
+  } else {
+    print_dependency_trees_for_all_targets($targets, STDOUT, $target_names_to_deps, $target_names_to_labels, $target_names);
+  }
+}
+
+if ($dump_for_reload) {
+  print(STDOUT dump_variables_of_type($variables, 'makefile.immediate'));
+  print(STDOUT dump_variables_of_type($variables, 'makefile.recursive'));
+  print(STDOUT dump_targets_of_type($targets, 'explicit.file'));
+  print(STDOUT dump_targets_of_type($targets, 'explicit.phony'));
+  print(STDOUT dump_targets_of_type($targets, 'implicit.file'));
+}
+
