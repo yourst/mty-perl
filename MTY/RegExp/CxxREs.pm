@@ -212,7 +212,7 @@ our $cxx_preprocessor_include_directive_re = compile_regexp(
   'the same fields as $cxx_preprocessor_include_directive_arguments_re.');
 
 our $cxx_preprocessor_define_directive_arguments_re = compile_regexp(
-  qr{^ ([\w\_\$]++) (?> \( ($inside_of_parens_re) \))? \s++ (.++) $}oamsx,
+  qr{^ ([\w\_\$]++) (?> \( ($inside_parens_re) \))? \s++ (.++) $}oamsx,
   'cxx_preprocessor_define_directive_arguments',
   'Arguments to #define directive, in the form "#define SYMBOL value" or '.
   '"MACRO(macro_arg1, ...) contents_to_expand"');
@@ -391,7 +391,7 @@ our $type_spec_re = compile_regexp(
       (?'type_specifier'
         (?>
           \b (?'type_alias_operator' decltype | typeof) \s
-          \( (?'expr_of_type' (?> $inside_of_parens_re)) \) \s
+          \( (?'expr_of_type' (?> $inside_parens_re)) \) \s
         ) |
         (?'fundamental_type_name' \b
           (?>
@@ -459,7 +459,7 @@ our $field_decl_re = compile_regexp(
      (?:
        (?:
          \: \s (?'bitwidth' \d++) |                 # name:123, (bitfield)
-         (?: \[ (?'array_size' $inside_of_square_brackets_re) \])      # name[123],  (array)
+         (?: \[ (?'array_size' $inside_square_brackets_re) \])      # name[123],  (array)
        )
        \s
      )?
@@ -475,7 +475,7 @@ our $typedef_decl_re = compile_regexp(
   qr{(?'typedef_decl'
        (?'type_ptr_or_ref' $ptr_or_ref_re) \s
        (?'typedef_new_type_name' $cxx_identifier_re)
-       (?: \s \[ (?'array_size' $inside_of_square_brackets_re) \] )?
+       (?: \s \[ (?'array_size' $inside_square_brackets_re) \] )?
      )
      \s (?: [,;] | \Z)
     }oamsx, 'typedef_decl', '');
@@ -504,7 +504,7 @@ our $function_type_name_args_body_re = compile_regexp(
          )
        )
      ) \s
-     \( (?'argument_list' $inside_of_parens_re) \) \s
+     \( (?'argument_list' $inside_parens_re) \) \s
      (?'trailing_function_attributes'
        (?:
          (?: && | const | volatile | noexcept (?> \s $parens_re)?) \s 
@@ -514,7 +514,7 @@ our $function_type_name_args_body_re = compile_regexp(
        (?: \= \s \b (?'default_or_delete_or_purevirt_suffix' default | delete | 0))? \s ; |
        (?:
          (?: \: (?'constructor_initializer_list' (?: \s $cxx_identifier_re \s $parens_re \s \,?){1,1024}))?
-         \{ (?'function_body' $inside_of_braces_re) \} \s ;?
+         \{ (?'function_body' $inside_braces_re) \} \s ;?
        )
      )}oamsx, 'function_type_name_args_body', '');
 
@@ -535,7 +535,7 @@ our $enum_def_re = compile_regexp(
   qr{\b enum
      (?> \s (?'enum_name' $cxx_identifier_re))?
      (?> \s \: \s (?'enum_datatype' $cxx_identifier_re))?
-     \s \{ (?'enum_list' $inside_of_braces_re) \} \s ; 
+     \s \{ (?'enum_list' $inside_braces_re) \} \s ; 
      }oamsx, 'enum_def', '');
 
 our $declaration_or_block_re = compile_regexp(
@@ -558,7 +558,7 @@ our $class_struct_union_re = compile_regexp(
       (struct|union|class) \s    # class, struct or union
       (?> ($cxx_identifier_re))     # name
       (?> \s \: \s [^\{\;]*+)?  # (optional) inheritance specification
-      \s \{ ($inside_of_braces_re) \} \s \;
+      \s \{ ($inside_braces_re) \} \s \;
      }oamsx, 'class_struct_union');
 
 # regex to match any C/C++ token, from http://www.perlmonks.org/?node_id=1049222
@@ -691,7 +691,7 @@ our @all_capture_group_names =
 #  \# $cxx_opt_space_re
 #  (?:
 #    (?'start_token' ifdef | ifndef | else | elif) |
-#    (?: (?'start_token' if) $cxx_opt_space_re \( (?'if_condition' $inside_of_parens_re) \) )
+#    (?: (?'start_token' if) $cxx_opt_space_re \( (?'if_condition' $inside_parens_re) \) )
 #  )
 #  (?'after_start_token' [^\n]*) \n
 #  (?'body' .

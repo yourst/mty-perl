@@ -89,6 +89,11 @@ $invalid_args = 0;
 my @filelist;
 my $string = '';
 
+my $match_color = fg_color_rgb(160, 255, 0).U;
+my $original_before_replacement_color = fg_color_rgb(255, 96, 0).scale_rgb_bg(bg_color_rgb(255, 96, 0), 0.2);
+my $replaced_match_color = fg_color_rgb(140, 224, 0).scale_rgb_bg(bg_color_rgb(140, 224, 0), 0.15);
+my $non_match_color = X.K;
+
 my $error_messages = '';
 
 sub show_error_and_exit {
@@ -465,6 +470,7 @@ if ($invalid_args) {
   perlre also supports several special identifiers in the format:
 
        (if using ':: file1 fileN...'):       (if using '-- string1 stringN...')
+  $* = matching substring
   $@ = filename containing the match (or original string if using '-- string ...')
   $& = filename (without dir) with the match (or original string)
   $% = file number (first file is 0)         string number (first string is 0)
@@ -474,7 +480,6 @@ if ($invalid_args) {
   $- = offset (0+) of start of match in line (if -m, from start of entire file or string)
   $+ = offset (0+) of end of match in line (if -m, from start of entire file or string)
   $? = length of match in characters
-  $* = matching substring
 
   When these are used to customize the formatting of filenames, the -no-filenames option may be useful.
 
@@ -655,6 +660,8 @@ if ($is_split) {
 # Interpolate special formatting identifiers:
 #
 %special_formats = (
+  '*' => '$matchstr',   # entire matching string
+  '_' => '$_',          # entire line containing match
   '@' => '$sourcename', # filename or original string
   '&' => '$sourcename_nodir', # filename (without directory) or original string
   '%' => '$sourceid',   # number of file or string in order listed on command line
@@ -663,15 +670,14 @@ if ($is_split) {
   '-' => '$startpos',   # offset of start of match
   '+' => '$endpos',     # offset of end of match
   '?' => '$matchlen',   # offset of end of match
-  '*' => '$matchstr',   # entire matching string
-  '_' => '$_',          # entire line containing match
+  '~' => '$origmatch',  # pre-substitution matching string (only used internally by '-subst -dry-run')
 );
 
 my $special_formats_re = 
-  qr{(?<! \\) \$(?:
-         ([\@\&\%\#\.\-\+\?\*\_]) | 
-         (?: \' (\w+) \')
-       )}oamsx;
+  qr{(?<! \\) \$ (?:
+       ([\@\&\%\#\.\-\+\?\*\_\~]) | 
+       (?: \' (\w+) \')
+     )}oamsx;
 
 sub replace_special_format {
   my ($format_code, $capture_group_name) = @_;
@@ -685,6 +691,16 @@ sub replace_special_format {
   }
 }
 
+if ($is_colorize && ($is_full_lines || ($capture_group_count > 0)) && is_stdout_color_capable()) {
+  # Obviously we don't want to colorize the actual text we're substituting 
+  # into files unless we're also printing that text to the console:
+  if ($is_subst) {
+    $format = $original_before_replacement_color.'$~'.$replaced_match_color.$format.X;
+  } else {
+    $format =~ s{[^\$\\] \K (\$ \{? \w+ \}?)}{${C}${1}${Y}}oamsxg;
+  }
+}
+
 if (!$is_eval && !$is_split) {
   if ($format =~ /(?<! \\) \$\@/oamsxg) { $is_show_filenames = 0; $is_show_filenames_at_top = 0; }
   $special_formats_used = ($format =~ s/$special_formats_re/replace_special_format($1, $2)/oamsxge);
@@ -694,16 +710,6 @@ if (!$is_eval && !$is_split) {
 }
 
 $format_uses_special_vars = ($special_formats_used > 0);
-
-if ($is_colorize && ($is_full_lines || ($capture_group_count > 0)) && is_stdout_color_capable()) {
-  # Obviously we don't want to colorize the actual text we're substituting 
-  # into files unless we're also printing that text to the console:
-  if ($is_subst) {
-    $format = $Y . $format . $X;
-  } else {
-    $format =~ s/[^\$\\]\K(\$\{?\w+\}?)/${C}$1${Y}/oamsg;
-  }
-}
 
 if ($is_show_filenames_at_top) { $is_show_filenames = 1; }
 
@@ -731,69 +737,63 @@ sub boolean_status_to_string {
 if ($DEBUG) {
   binmode STDOUT, ':utf8';
   binmode STDERR, ':utf8';
-  my $H = $B.'// '.$X;
-  my $NL = $X.NL;
 
-  print(STDERR $H.' ------------------------ '.$G.$U.'perlre Debug Status'.$X.$K.' ------------------------'.$NL);
-  print(STDERR $H.
-        boolean_status_to_string("eval", $is_eval).$K.', '.$X.
-        boolean_status_to_string("subst", $is_subst).$K.', '.$X.
-        boolean_status_to_string("anycase", $is_anycase).$K.', '.$X.
-        boolean_status_to_string("invert", $is_invert).$K.', '.$X.
-        boolean_status_to_string("multiline", $is_multiline).$NL.$H.
-        boolean_status_to_string("string", $is_string).$K.', '.$X.
-        boolean_status_to_string("filelist", $is_filelist).$K.', '.$X.
-        boolean_status_to_string("stdio", $is_stdio).$K.', '.$X.
-        ($is_subst ? (boolean_status_to_string("subst_to_stdout", $is_subst_to_stdout).$NL.$H) : '').
-        boolean_status_to_string("test", $is_dry_run).$K.', '.$X.
-        boolean_status_to_string("colorize", $is_colorize).$K.', '.$X.
-        boolean_status_to_string("show_filenames", $is_show_filenames).$K.', '.$X.
-        boolean_status_to_string("show_filenames_at_top", $is_show_filenames_at_top).$NL.$H.
-        ($is_split ? (boolean_status_to_string("key_lowercase", $is_key_lowercase).$K.', '.$X) : '').
-        ($is_split ? (boolean_status_to_string("key_uppercase", $is_key_uppercase).$NL) : ''));
-  print(STDERR $H.boolean_status_to_string("show_colorized_compiled_regexps", $show_colorized_compiled_regexps).$NL);
-  print(STDERR 
-        $H.$Y.'matching_line_count_limit '.$X.$matching_line_count_limit.$NL.
-        $H.$Y.'format_uses_special_vars '.$X.$format_uses_special_vars.$NL);
-  print(STDERR $H.$NL);
-  #my $formatted_orig_regexp = $orig_regexp;
-  #if ($is_colorize) { $formatted_orig_regexp = format_regexp($orig_regexp); }
-  #my $formatted_exp_regexp = $expanded_regexp;
-  #if ($is_colorize) { $formatted_exp_regexp = format_regexp($expanded_regexp); }
+  my $status = '%{tab}'.G.U.'perlre Debug Status'.X.NL;
+  
+  $status .=
+    boolean_status_to_string("eval", $is_eval).$K.', '.$X.
+    boolean_status_to_string("subst", $is_subst).$K.', '.$X.
+    boolean_status_to_string("anycase", $is_anycase).$K.', '.$X.
+    boolean_status_to_string("invert", $is_invert).$K.', '.$X.
+    boolean_status_to_string("multiline", $is_multiline).NL.
+    boolean_status_to_string("string", $is_string).$K.', '.$X.
+    boolean_status_to_string("filelist", $is_filelist).$K.', '.$X.
+    boolean_status_to_string("stdio", $is_stdio).$K.', '.$X.
+    ($is_subst ? (boolean_status_to_string("subst_to_stdout", $is_subst_to_stdout).NL) : '').
+    boolean_status_to_string("test", $is_dry_run).$K.', '.$X.
+    boolean_status_to_string("colorize", $is_colorize).$K.', '.$X.
+    boolean_status_to_string("show_filenames", $is_show_filenames).$K.', '.$X.
+    boolean_status_to_string("show_filenames_at_top", $is_show_filenames_at_top).NL.
+    ($is_split ? (boolean_status_to_string("key_lowercase", $is_key_lowercase).$K.', '.$X) : '').
+    ($is_split ? (boolean_status_to_string("key_uppercase", $is_key_uppercase).NL) : '').
+    boolean_status_to_string("show_colorized_compiled_regexps", $show_colorized_compiled_regexps).NL.
+    Y.'matching_line_count_limit '.$X.$matching_line_count_limit.NL.
+    boolean_status_to_string('format_uses_special_vars', $format_uses_special_vars).NL.NL;
+  $status .=
+    Y.'original RE'.K.' = '.NL.show_compiled_regexp('original', $orig_regexp);
+  $status .=
+    Y.'expanded RE'.K.' = '.NL.show_compiled_regexp('expanded', $expanded_regexp).
+    Y.'compiled RE'.K.' = '.NL.show_compiled_regexp('compiled', $regexp).
+    Y.'compiled RE from text form'.K.' = '.format_quoted($compiled_regexp_as_text).NL.
+    Y.'RE options '.K.' = '.left_quote.G.$regexp_opts.K.right_quote.NL.
+    Y.'Capture groups '.K.'('.Y.$capture_group_count.K.' groups)'.NL;
 
-  print(STDERR $H.$Y.'original RE'.$K.' = '.NL); show_compiled_regexp('original', $orig_regexp);
-  print(STDERR $H.$Y.'expanded RE'.$K.' = '.NL); show_compiled_regexp('expanded', $expanded_regexp);
-  print(STDERR $Y.'compiled RE'.$K.' = '.NL); show_compiled_regexp('compiled', $regexp);
-  print(STDERR $Y.'compiled RE from text form'.$K.' = '.format_quoted($compiled_regexp_as_text).NL);
-  print(STDERR $H.$Y.'RE options '.$K.' = '.left_quote.$G.$regexp_opts.$K.right_quote.$NL);
-  print(STDERR $H.$Y.'Capture groups '.$K.'('.$Y.$capture_group_count.$K.' groups)'.$NL);
-  #for (my $i = 0; $i < $capture_group_count; $i++) {
-  #my $g = $capture_groups[$i];
-  #print(STDERR "  ${Y}".$i."${K} = ${left_quote}${G}".$g."${K}${right_quote}${X}\n");
-  #}
-  #printf(STDERR "${K}\}${X}\n");
+  #while (my ($i, $g) = @capture_groups) 
+  #  { $status .= '  '.Y.$i.$K.' = '.format_quoted(G.$g).NL; }
+
   if ($is_split) {
-    print(STDERR $H.$Y.'split-key-prefix'.$K.' = '.left_quote.$G.$split_key_prefix.$K.right_quote.$NL);
-    print(STDERR $H.$Y.'split-key-suffix'.$K.' = '.left_quote.$G.$split_key_suffix.$K.right_quote.$NL);
-  }
-  if ($is_subst) {
-    print(STDERR $H.$Y.'subst_output_dir_prefix'.$K.' = '.left_quote.$G.$subst_output_dir_prefix.$K.right_quote.$NL);
+    $status .= 
+      Y.'split-key-prefix'.K.' = '.format_quoted(G.$split_key_prefix).NL.
+      Y.'split-key-suffix'.K.' = '.format_quoted(G.$split_key_suffix).NL;
+  } elsif ($is_subst) {
+    $status .= Y.'subst_output_dir_prefix'.K.' = '.format_quoted(G.($subst_output_dir_prefix // '')).NL;
   }
 
   my $printed_format = ($format =~ s/\n/\\n/rmsg =~ s/\t/\\t/rmsg =~ s/\r/\\r/rmsg =~ s/\e/\\e/rmsg);
   $printed_format =~ s{\\(.)}{${B}$1${X}}msg;
 
-  print(STDERR $H.$Y.'format (' . (($format_specified) ? 'specified' : 'default') . ')'.$K.' = '.
-        left_quote.$G.$printed_format.$K.right_quote.$NL);
+  $status .= Y.'format (' . (($format_specified) ? 'specified' : 'default') . ')'.K.' = '.
+    format_quoted(G.$printed_format).NL;
   if ($is_string) {
-    print(STDERR $H.$Y.'string'.$K.' = '.left_quote.$G.$string.$K.right_quote.$NL);
+    $status .= Y.'string'.K.' = '.format_quoted(G.$string).NL;
   }
-  print(STDERR $H.$Y.'program name'.$K.' = '.left_quote.$G.$0.$K.right_quote.$NL);
+  print(STDERR Y.'program name'.K.' = '.format_quoted(G.$0).NL);
   if ($is_filelist) {
-    print(STDERR $H.$Y.$U.'Filename list ('.(scalar @filelist).' files):'.$NL);
-    foreach $filename (@filelist) { print(STDERR $H.'  '.$filename.$NL); }
+    $status .= Y.U.'Filename list ('.(scalar @filelist).' files):'.NL;
+    foreach $filename (@filelist) { $status .= K.' '.dot.' '.X.$filename.NL; }
   }
-  print(STDERR $H.$K.'-------------------- End of perlre Debug Status ---------------------'.$NL);
+
+  print(STDERR text_in_a_box($status));
 }
 
 if (!$is_eval) {
@@ -857,11 +857,12 @@ sub process_file {
   my $matches = 0;
   my $linenum = 1;
   my $linenum_last_redefined_at_real_line = 1;
+  my $origmatch = '';
 
   if ($is_subst) {
   L: while (<$IN>) {
       study($_) if (length($_) >= 1024);
-      my $m = ($_ =~ s/$regexp/$format/gee);
+      my $m = ($_ =~ s{$regexp}{$origmatch = substr($_, $-[0], $+[0] - $-[0]); $format}gee);
       print($OUT $_);
       $matches += $m; last L if ($matches >= $matching_line_count_limit);
     }
@@ -927,8 +928,8 @@ sub process_file {
             
             if ($is_colorize && ($capture_group_count > 0) && $is_full_lines) {
               my $s = $origline;
-              $s =~ s/$regexp/$Y.(eval $format).$K/ge;
-              print($STDERR $K.$s.$X.NL);
+              $s =~ s/$regexp/$match_color.(eval $format).$non_match_color/ge;
+              print($STDERR $non_match_color.$s.X.NL);
             } else {
               my $s = (eval $format) // '';
               print($OUT $s);

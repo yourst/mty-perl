@@ -118,12 +118,16 @@ final_suffix ?= $(lastword $(subst .,${SPACE},${1}))
 strip_all_suffixes ?= $(firstword $(subst .,${SPACE},${1}))
 strip_all_suffixes_and_dirs ?= $(call strip_all_suffixes,$(notdir ${1}))
 
+define format_summarized_files_in_dir
+${3}${1}/$(if $(findstring ${SPACE},${2}),{${2}},${2})${4}
+endef # format_summarized_path
+
 define summarize_paths
-$(foreach d,$(sort $(patsubst %/,%,$(dir ${1}))),${d}/{$(notdir $(filter ${d}/%,${1}))})
+$(foreach d,$(sort $(patsubst %/,%,$(dir ${1}))),$(call format_summarized_files_in_dir,${d},$(notdir $(filter ${d}/%,${1})),$(or ${2},),$(or ${3},)))
 endef # summarize_paths
 
 define summarize_paths_across_lines
-$(foreach d,$(sort $(patsubst %/,%,$(dir ${1}))),${2}${d}/{ $(notdir $(filter ${d}/%,${1})) }${NL})
+$(call summarize_paths,${1},${2},${NL})
 endef # summarize_paths_across_lines
 
 shell_output_lines = $(subst ${TAB},${NL},$(shell { ${1} } | tr '\n' '\t'))

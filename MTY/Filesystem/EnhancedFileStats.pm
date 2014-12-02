@@ -526,12 +526,9 @@ sub stat_files_in_directory { # ($;+$$+$$+)
   $prepend_to_path_key //= '';
   $get_enhanced_stats //= STATS_QUERY_DEFAULT;
 
-  # print(STDERR 'stat_files_in_directory('.join_undefs(', ', @_).')'.NL);
-  
   my $close_base_dir_fd = (!defined $base_dir_fd);
 
   $base_dir_fd //= sys_open_path($base_dir_path, undef, 0);
-  # print(STDERR 'base_dir_fd = '.$base_dir_fd.NL);  
 
   if (!defined $base_dir_fd) { 
     warn('Cannot open directory "'.$base_dir_path.'" (errno '.$?.')');
@@ -549,10 +546,11 @@ sub stat_files_in_directory { # ($;+$$+$$+)
   prealloc($filename_to_stats_hash, $filenames);
 
   foreach my $filename (@$filenames) {
-    $filename_to_stats_hash->{$prepend_to_path_key.$filename} = 
-      get_enhanced_file_stats($filename, $follow_symlinks, undef, 
-      $base_dir_fd, $base_dir_path, $base_dir_stats, 
-      $get_enhanced_stats, $open_files);
+    my $stats = get_enhanced_file_stats($filename, $follow_symlinks, undef, 
+                                        $base_dir_fd, $base_dir_path, $base_dir_stats, 
+                                        $get_enhanced_stats, $open_files);
+
+    $filename_to_stats_hash->{$prepend_to_path_key.$filename} = $stats;
   }
 
   sys_close($base_dir_fd) if ($close_base_dir_fd);

@@ -461,7 +461,7 @@ BEGIN {
             (?> (left|center|right) (*:ALIGN)) |
             (?> (align) = (\w+) (?> ,pad = ([^\}]++))? (*:ALIGN)) |
             (?> (column) = ([\+\-]?) (\d+) (?> ,pad = ([^\}]++))? (*:COLUMN)) |
-            (?> (div) (?: = ($inside_of_braces_re))? (*:DIV)) |
+            (?> (div) (?: = ($inside_braces_re))? (*:DIV)) |
             (?> (tab) = ([\d\+\,]+) (*:TAB)) |
             (?> (sym) = ($printable_symbol_spec_re) (*:SYM)) |
             (?> (fg | bg | rgb (?:fg | bg)?) =
@@ -473,11 +473,11 @@ BEGIN {
             (?> (rep) (?> = (\d+))? (*:REP)) |
             (?> (endrep) (?> = (\d+))? (*:ENDREP)) |
             (?> (fill) (*:FILL)) |
-            (?> (consoletitle) = ($inside_of_braces_re) (*:TITLE)) |
-            (?> (consolesubtitle) = ($inside_of_braces_re) (*:SUBTITLE)) |
+            (?> (consoletitle) = ($inside_braces_re) (*:TITLE)) |
+            (?> (consolesubtitle) = ($inside_braces_re) (*:SUBTITLE)) |
             (?> (endbox) (*:ENDBOX)) |
             (?> (clear(?>screen)?) (*:CLEAR)) |
-            (?> (esc) = ($inside_of_braces_re) (*:ESC))
+            (?> (esc) = ($inside_braces_re) (*:ESC))
           ) \} |
           \[ () ($printable_symbol_spec_re) (*:SYM) 
         )

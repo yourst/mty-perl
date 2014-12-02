@@ -500,7 +500,7 @@ sub describe_regexp_metadata($) {
        $value.NL;
   };
 
-  $out .= format_metadata_line('Modifiers', $M.join($B.dashed_vert_bar_3_dashes.$M, split(//oax, $m->{modifiers})));
+  $out .= format_metadata_line('Modifiers', $M.join($B.dashed_vert_bar_3_dashes.$M, split(//oax, ($m->{modifiers} // ''))));
   $out .= format_metadata_line('Characters', $m->{characters});
   $out .= format_metadata_line('Tokens', $m->{tokens});
   $out .= format_metadata_line('Structural Groups', $m->{structural_groups});
@@ -514,22 +514,25 @@ sub describe_regexp_metadata($) {
 }
 
 sub show_compiled_regexp($;$$$) {
-  my $regexp_name = $_[0];
-  my $re = $_[1] // $compiled_regexps{$regexp_name};
+  my ($regexp_name, $re, $description, $pretty_print) = @_;
+
+  $re //= $compiled_regexps{$regexp_name};
 
   if (ref $re) { $re = ${$re}; }
 
   $tree_pre_branch_color = fg_color_rgb(64, 64, 64);
   
-  my $modifiers = '';
-  ($resrc, $modifiers) = regexp_pattern($re);
+  my ($resrc, $modifiers) = regexp_pattern($re);
+  $resrc //= $re;
+  $modifiers //= '';
+
   my $tokens = tokenize_regexp($resrc, $modifiers);
   my $metadata = get_tokenized_regexp_metadata($re, $tokens);
   my $rootnode = tokenized_regexp_to_tree($tokens, $modifiers);
   my $printable_tree = regexp_parse_tree_to_printable_tree($rootnode, 'regexp_name');
 
-  my $description = $_[2] // $compiled_regexp_descriptions{$regexp_name} // '';
-  my $pretty_print = $_[3] // 1;
+  $description //= $compiled_regexp_descriptions{$regexp_name} // '';
+  $pretty_print //= 1;
 
   my $box_width = get_terminal_width_in_columns() - 10;
 

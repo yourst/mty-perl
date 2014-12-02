@@ -87,7 +87,7 @@ $file_line_col_eow_message_re =
      (\d+) \: (\d+) \: \s* (\w+\:) \s* (.*)$/oax;
 
 $file_rest_re = qr/^(\S+ \. \w+): \s* (.*)$/oax;
-$message_template_params_re = qr/(\[with\s+$inside_of_square_brackets_re\])/oax;
+$message_template_params_re = qr/(\[with\s+$inside_square_brackets_re\])/oax;
 
 $printed_header_line = 0;
 

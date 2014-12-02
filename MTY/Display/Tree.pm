@@ -201,7 +201,7 @@ my $tree_label_markup_re =
        (?>
          \% \{ 
          ([^\=\}]++) 
-         (?> \= ($inside_of_braces_re))?
+         (?> \= ($inside_braces_re))?
          \} 
        ) | 
        (?>

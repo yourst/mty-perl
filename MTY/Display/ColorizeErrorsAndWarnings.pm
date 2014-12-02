@@ -67,7 +67,7 @@ my $perl_package_and_identifier_re = qr{((?: \w+ ::)*) (\w+)}oax;
 my $call_stack_line_re = 
   qr{(?: 
        $perl_package_and_identifier_re
-       \( ($inside_of_parens_re) \) \s+
+       \( ($inside_parens_re) \) \s+
        (?: called \s+)? 
      )? at \s+ (\S+) \s+ line \s+ (\d+) \.?
   }oax;

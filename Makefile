@@ -153,7 +153,7 @@ $(foreach d,${PERL_MODULE_DIRS},$(eval $(call generate_module_bundle_rule,${d}))
 USE_SUDO := $(shell [[ -w ${DESTDIR}/ && -w ${INSTALLED_PERL_SCRIPTS_DIR}/ ]] && echo "" || echo sudo)
 DESTDIR ?= ${PERL_SITELIB}
 
-RSYNC_OPTIONS := -aAXxuc --omit-dir-times --out-format='%n'
+RSYNC_OPTIONS := -aAXxuc --omit-dir-times --out-format=$$'\t\t - %n'
 RSYNC_DRY_RUN_OPTIONS := ${RSYNC_OPTIONS} --dry-run
 
 sync-modules: ${PERL_MODULES}
@@ -166,7 +166,7 @@ install-modules: ${PERL_MODULES} ${PERL_BUNDLE_MODULES}
 
 test-install-modules: ${PERL_MODULES} ${PERL_BUNDLE_MODULES} build/modules.list
 	$(call print_build,TESTinst,(dry run) Installing $(words ${PERL_MODULES}) Perl modules into ${DESTDIR})
-	@rsync ${RSYNC_DRY_RUN_OPTIONS} MTY/ ${DESTDIR}/MTY/ | grep -v -P '/\Z'
+	@rsync ${RSYNC_DRY_RUN_OPTIONS} MTY/ ${DESTDIR}/MTY/ | grep -v -P '/\Z' || true
 
 sync-scripts: ${PERL_SCRIPTS}
 	$(call print_build,SYNC,Synchronizing source tree with any newer Perl scripts in ${INSTALLED_PERL_SCRIPTS_DIR})
@@ -178,11 +178,12 @@ install-scripts: ${PERL_SCRIPTS}
 
 test-install-scripts: ${PERL_SCRIPTS} build/perl-scripts.list
 	$(call print_build,TESTinst,(dry-run) Installing $(words ${PERL_SCRIPTS}) Perl scripts into ${INSTALLED_PERL_SCRIPTS_DIR})
-	@rsync ${RSYNC_DRY_RUN_OPTIONS} scripts/ ${INSTALLED_PERL_SCRIPTS_DIR}/ | grep -v -P '/\Z'
+	@rsync ${RSYNC_DRY_RUN_OPTIONS} scripts/ ${INSTALLED_PERL_SCRIPTS_DIR}/ | grep -v -P '/\Z' || true
 
 sync: sync-modules sync-scripts
 install-without-sync: install-modules install-scripts
 install: install-modules install-scripts
+test-install: test-install-modules test-install-scripts
 
 #
 # Miscellaneous targets:

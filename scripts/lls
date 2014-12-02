@@ -56,6 +56,10 @@ my $max_file_size_decimal_digits = 7;
 my $comma_separated_digits = 1;
 my $human_readable_sizes = 0;
 my $show_directory_itself = 0;
+my $only_show_directories = 0;
+my $only_show_files = 0;
+my $only_show_symlinks = 0;
+my $show_dot_and_dot_dot = 0;
 my $match_all_patterns = 0;
 my $match_any_patterns = 1;
 my $show_acls = 1;
@@ -696,6 +700,8 @@ sub init_file_type_to_sorting_rank($) {
   return $r;
 };
 
+my @file_type_to_sorting_rank;
+
 INIT {
   init_file_type_to_sorting_rank(\@file_type_to_sorting_rank);
 };
@@ -757,6 +763,7 @@ sub format_filename($$) {
   my $filename = filename_of($path);
 
   my ($type, $perms, $size, $symlink) = @{$stats}[STAT_TYPE, STAT_MODE, STAT_SIZE, STAT_SYMLINK];
+  my $is_dot_or_dot_dot = ($filename =~ /\A\..?\Z/oax) ? 1 : 0;
 
   my $xattrs = $stats->[STAT_XATTRS];
   my $capabilities_xattr = $stats->[STAT_CAPABILITIES];
@@ -798,6 +805,7 @@ sub format_filename($$) {
 
     $append = $symlink_symbol.$symlink_target_color.$symlink;
   } elsif ($type == FILE_TYPE_DIR || $type >= FILE_TYPE_MOUNT_POINT) {
+    $dirname = strip_trailing_slash($dirname);
     $color = $U.get_file_type_color($type);
     $prepend = $directory_shaded_color;
     $append = $UX.$directory_separator_symbol;
@@ -812,8 +820,8 @@ sub format_filename($$) {
   }
 
   if ($is_open) {
-    $prepend = $U.$prepend;
-    $append = $append.$UX;
+    $prepend = U.$prepend;
+    $append = $append.UX;
   }
 
   if ($is_backup) { 
@@ -823,8 +831,28 @@ sub format_filename($$) {
 
   $suffix_color //= $color;
 
-  $dirname = ($unique_dir_count > 1) ? 
-    $directory_shaded_color.$dirname : '';
+  my $dir_color = (($unique_dir_count > 1) && (!$is_dot_or_dot_dot)) 
+    ? $directory_shaded_color : get_file_type_color(FILE_TYPE_DIR);
+
+  # Only show the full directory path if the filename is '.', '..' or we're listing multiple directories:
+  # $dirname = strip_trailing_slash($dirname);
+  if ($filename eq '..') { $dirname =~ s{/?[^/]+\Z}{}oamsx; }
+
+  $filename = 
+    ($filename eq '.') ? dot : 
+    ($filename eq '..') ? dot.dot : 
+    $filename;
+
+  $dirname = 
+    ($is_dot_or_dot_dot) ? $dir_color.$filename.$directory_shaded_color.' = '.$dir_color.$dirname :
+    ($unique_dir_count > 1) ? $directory_shaded_color.$dirname : '';
+
+  if ($is_dot_or_dot_dot) {
+    $basename = ''; 
+    $suffixes = '';
+  }
+
+  $dirname =~ s{/}{$directory_separator_symbol$dir_color}oaxg;
 
   if (defined $suffix_color) 
     { $suffixes =~ s{\.}{${filename_dots_color}.${suffix_color}}oaxg; }
@@ -975,8 +1003,13 @@ sub set_field_search_pattern {
 # but GNU ls does *not* use these remaining single letter options,
 # so we are free to use them for our own enhanced features:
 #
+# We use the following letters which are not already used by ls:
 #         eE        jJ K   M   O P           V W  yYz
-# we use:  ^           ^       ^ ^
+#         ^            ^       ^ ^
+#
+# We reuse these for a different purpose than ls:
+#       D   F
+#       ^   ^
 #
 
 my %command_line_options = (
@@ -989,15 +1022,18 @@ my %command_line_options = (
   'h' => [ \$human_readable_sizes, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 'human-readable' ] ],
   'digits' => [ \$max_file_size_decimal_digits, OPTION_VALUE_REQUIRED, [ 'size-digits', 'file-size-digits' ] ],
   'comma' => [ \$comma_separated_digits, OPTION_ASSIGN_BOOL, [ 'comma-sep-sizes' ] ],
-  'd' => [ \$show_directory_itself, OPTION_SINGLE_CHAR_COMBINABLE, [ 'directory' ] ],
+  'd' => [ \$show_directory_itself, OPTION_SINGLE_CHAR_COMBINABLE, [ 'directory-itself', 'dir-itself', ] ],
+  'D' => [ \$only_show_directories, OPTION_SINGLE_CHAR_COMBINABLE, [ 'only-dirs', 'only-show-dirs', 'only-directories' ] ],
+  'F' => [ \$only_show_files, OPTION_SINGLE_CHAR_COMBINABLE, [ 'only-files', 'only-show-files' ] ],
+  'K' => [ \$only_show_symlinks, OPTION_SINGLE_CHAR_COMBINABLE, [ 'only-links', 'only-show-links', 'only-symlinks', 'only-show-symlinks' ] ],
   'i' => [ \$show_inodes, OPTION_SINGLE_CHAR_COMBINABLE, [ 'inodes', 'inode', 'ino' ] ],
-  'acls' => [ \$show_acls, OPTION_SINGLE_CHAR_COMBINABLE, [ 'P', 'acl' ] ], 
-  'xattrs' => [ \$show_xattrs, OPTION_SINGLE_CHAR_COMBINABLE, [ 'E', 'xattr', 'ea', 'eas' ] ],
-  'extents' => [ \$show_extents, OPTION_SINGLE_CHAR_COMBINABLE, [ 'K', 'cloned', 'cloned-extents', 'copy-on-write', 'cow', 'btrfs' ] ],
-  'open-files' => [ \$show_open_files, OPTION_SINGLE_CHAR_COMBINABLE, [ 'O', 'openfd', 'openfds', 'open', 'opened', 'lsof', 'fuser' ] ],
+  'P' => [ \$show_acls, OPTION_SINGLE_CHAR_COMBINABLE, [ 'acls', 'acl' ] ], 
+  'e' => [ \$show_xattrs, OPTION_SINGLE_CHAR_COMBINABLE, [ 'xattrs', 'xattr', 'eas', 'extattrs' ] ],
+  'j' => [ \$show_extents, OPTION_SINGLE_CHAR_COMBINABLE, [ 'extents', 'cloned', 'cloned-extents', 'copy-on-write', 'cow', 'btrfs', 'sparse' ] ],
+  'O' => [ \$show_open_files, OPTION_SINGLE_CHAR_COMBINABLE, [ 'open-files', 'openfd', 'openfds', 'open', 'opened', 'lsof', 'fuser' ] ],
   'column-headers' => [ \$print_column_headers, OPTION_TOGGLE_BOOL, ['colhdrs', 'column-headers'] ],
   'combine-common-uid-gid' => [ \$combine_common_uid_gid, OPTION_TOGGLE_BOOL, ['cug', 'comxid'] ],
-
+  '.' => [ \$show_dot_and_dot_dot, OPTION_TOGGLE_BOOL, [ 'show-.-and-..', '.-..', '.-and-..', 'dot-and-dot-dot', 'cwd-and-parent'] ],
 # 'search' => [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED|OPTION_COMMA_SEP_LISTS|OPTION_APPEND_REPEATS, [ 'grep', 'find' ] ],
   'and' => [ \&match_all_patterns, 0 ],
   'or' => [ \&match_any_patterns, 0 ],
@@ -1158,7 +1194,6 @@ sub lls_main {
   foreach my $dirname (sort keys %dir_to_filename_list) {
     my $filenames = $dir_to_filename_list{$dirname};
     my $prefix = ($unique_dir_count > 1) ? normalize_trailing_slash($dirname) : '';
-    #$dirname = strip_trailing_slash($dirname);
 
     stat_files_in_directory($dirname, $filenames, 0, undef, undef, 
                             $allstats, $prefix, $stats_to_query, $open_files);
@@ -1175,15 +1210,16 @@ sub lls_main {
 
   #
   # Phase 2: Scan the list of filenames and their stats to determine:
-  # 
-  # - the longest text representation of each field, so columns can be
-  #   padded with whitespace so everything lines up properly
+  # whether all files repeat the same value in certain stat fields,
+  # in which case the redundant fields are by default omitted from
+  # the listing to save space and reduce visual clutter. 
   #
-  # - whether all files repeat the same value in certain stat fields;
-  #   in this case, the redundant fields may be omitted from the listing
-  #   to save space and reduce visual clutter (this applies to at least
-  #   the owner, group, permissions, timestamp fields).
+  # This affects the following fields by default (unless corresponding
+  # command line options are specified to override this default):
   #
+  #   owner, group, perms, links, date.year, time, time_since_changed, actual_type
+  #
+
   my $common_uid = undef;
   my $common_gid = undef;
 
@@ -1196,29 +1232,9 @@ sub lls_main {
     $all_file_gids_match_common_gid = 0;
   }
 
-  my $longest_user_name = 0;
-  my $longest_group_name = 0;
-  my $longest_filename_length = 0;
-
-  my $file_size_field_width = 0;
-  my $longest_possible_size_string = '9' x $max_file_size_decimal_digits;
-
-  # 20 decimal digits are in 2**64 - 1:
-  my $digit_group_sep = (($comma_separated_digits) ? ',' : '');
-  for (my $d = 3; $d <= 62; $d++) {
-    my $v = (1 << $d);
-    my $s = format_size_with_units($v, $max_file_size_decimal_digits, $digit_group_sep, ' ', 'b');
-    set_max($file_size_field_width, length($s));
-  }
-
-  $file_size_field_width = max($file_size_field_width, 16); # enough space for dev major minor too.
-
-  my $max_links_digits = 0;
   my $every_file_has_only_one_hard_link = 1;
   my $newest_file_timestamp_in_listing = 0;
   my $has_open_files = 0;
-  my $largest_inode = 0;
-  my $largest_devid = 0;
 
   #
   # Omit the owner and/or group name if and only if every file
@@ -1227,33 +1243,39 @@ sub lls_main {
   # every file has a single hard link to itself.
   #
 
-  foreach my $filename (@ordered_filenames) {      
+  my @allowed_file_types;
+  if ($only_show_files || $only_show_directories || $only_show_symlinks) {
+    @allowed_file_types = (0) x FILE_TYPE_COUNT;
+    if ($only_show_files) { $allowed_file_types[FILE_TYPE_FILE] = 1; }
+    if ($only_show_directories) { $allowed_file_types[FILE_TYPE_DIR] = 1; }
+    if ($only_show_symlinks) { $allowed_file_types[FILE_TYPE_SYMLINK] = 1; }
+  } else {
+    @allowed_file_types = (1) x FILE_TYPE_COUNT;
+  }
+
+  foreach my $filename (@ordered_filenames) {
     next if (!defined $filename);
 
     my $stats = $allstats->{$filename};
 
     my ($type, $perms, $fileuid, $filegid, $size, $links, $timestamp, $devid, $inode) = 
-      @{$stats}[STAT_TYPE, STAT_MODE, STAT_UID, STAT_GID, STAT_SIZE, STAT_NLINK, STAT_MTIME_NS, STAT_DEV, STAT_INODE];
+      @{$stats}[STAT_TYPE, STAT_MODE, STAT_UID, STAT_GID, STAT_SIZE, STAT_NLINK, STAT_MTIME_NS, STAT_DEV, STAT_INODE];        
 
     # The '.' and/or '..' hard links may actually refer to mount points 
     # or subvolumes rather than just being simple directories, so don't
     # skip them if they are in fact these special directory types.
-    my $skip = (($filename eq '.' || $filename eq '..') && ($type == FILE_TYPE_DIR));
+    my $skip = 
+      ((($filename eq '.' || $filename eq '..') && ($type == FILE_TYPE_DIR)) && (!$show_directory_itself) && (!$show_dot_and_dot_dot)) ||
+      ($show_directory_itself && ($filename ne '.')) ||
+      (!$allowed_file_types[$type]);
+
+    if ($skip) { $filename = undef; next; }
 
     if (!defined $common_uid) { $common_uid = $fileuid; }
     if (!defined $common_gid) { $common_gid = $filegid; }
     $all_file_uids_match_common_uid &= ($fileuid == $common_uid);
     $all_file_gids_match_common_gid &= ($filegid == $common_gid);
-    my $user_name = lookup_user_name_from_uid($fileuid) // 'uid-'.$fileuid;
-    my $group_name = lookup_group_name_from_gid($filegid) // 'gid-'.$filegid;
-    set_max($longest_user_name, length($user_name));
-    set_max($longest_group_name, length($group_name));
-    set_max($longest_filename_length, length($filename));
-
-    set_max($max_links_digits, ($links != 1) ? length("$links")+1 : 0);
     set_max($newest_file_timestamp_in_listing, $timestamp) if (!$skip);
-    set_max($largest_devid, $devid);
-    set_max($largest_inode, $inode);
     if (defined $stats->[STAT_OPENFD]) { $has_open_files = 1 };
 
     #
@@ -1265,26 +1287,37 @@ sub lls_main {
     if (($type != FILE_TYPE_DIR) && ($type < FILE_TYPE_MOUNT_POINT)) { $every_file_has_only_one_hard_link &= ($links == 1); }
   }
 
-  my $common_uid_gid_message = '';
+  my $common_messages = '';
+  my $common_message_lines = 0;
 
   if ($all_file_uids_match_common_uid || $all_file_gids_match_common_gid) {
-    $common_uid_gid_message = $C.' '.star.'  '.$B.'All '.$C.sizeof(@ordered_filenames).$B.' items are owned by ';
+    $common_messages = $C.' '.star.'  '.$B.'All '.$C.sizeof(@ordered_filenames).$B.' items are owned by ';
     if ($all_file_uids_match_common_uid) {
-      $common_uid_gid_message .= 'user '.$G.
+      $common_messages .= 'user '.$G.
         (lookup_user_name_from_uid($common_uid) // $R.'<unknown>').$B.
           ' (uid '.$M.$common_uid.$B.')';
     }
-    if ($all_file_uids_match_common_uid && $all_file_gids_match_common_gid) { $common_uid_gid_message .= ' and '; }
+    if ($all_file_uids_match_common_uid && $all_file_gids_match_common_gid) { $common_messages .= ' and '; }
     if ($all_file_gids_match_common_gid) {
-      $common_uid_gid_message .= 'group '.$G.
+      $common_messages .= 'group '.$G.
         (lookup_group_name_from_gid($common_gid) // $R.'<unknown>').$B.
           ' (gid '.$M.$common_gid.$B.')';
     }
-    $common_uid_gid_message .= NL;
+    $common_messages .= NL;
+    $common_message_lines++;
   }
 
-  $largest_inode = length("$largest_inode");
-  $largest_devid = length("$largest_devid");
+  if ($only_show_files || $only_show_directories || $only_show_symlinks) {
+    my @only_showing = (
+      (($only_show_files) ? 'files' : ( )),
+      (($only_show_directories) ? 'directories' : ( )),
+      (($only_show_symlinks) ? 'symlinks' : ( ))
+    );
+
+    $common_messages .= ORANGE.' '.warning_sign.'  '.Y.'Only showing '.
+      ORANGE.join(Y.', '.ORANGE, @only_showing).X.NL;
+    $common_message_lines++;
+  }
 
   my $is_dot_or_dot_dot_re = qr{(?: \A | /) \. \.? $}oax;
 
@@ -1310,9 +1343,9 @@ sub lls_main {
   my $terminal_lines = get_terminal_height_in_lines();
   my $output_line_counter = 0;
 
-  print($common_uid_gid_message);
-  # if ($print_column_headers) { print($column_headers); }
-  $output_line_counter += 2;
+  print($common_messages);
+  $output_line_counter += $common_message_lines;
+  # if ($print_column_headers) { print($column_headers); $output_line_counter++; }
 
   #
   # Phase 3: format and print the final listing of filenames 
@@ -1434,8 +1467,8 @@ sub lls_main {
 
   if ($output_line_counter >= $terminal_lines) {
     # if ($print_column_headers) { print($column_headers); }
-    print($common_uid_gid_message);
-    $output_line_counter += 2;
+    print($common_messages);
+    $output_line_counter += $common_message_lines;
   }
 }
 

@@ -48,7 +48,7 @@ our $perl_exports_clause_re =
   qr{\b our \s*+ \@ EXPORT \s*+ = \s*+ (?: \# [^\n]+ \n)? \s*+ qw \s*+ $parens_re \s*+ \;}oamsx;
 
 our $perl_optional_exports_clause_re = 
-  qr{\b our \s*+ \@ EXPORT_OK \s*+ = \s*+ qw \s*+ \( ($inside_of_parens_re) \)}oamsx;
+  qr{\b our \s*+ \@ EXPORT_OK \s*+ = \s*+ qw \s*+ \( ($inside_parens_re) \)}oamsx;
 
 our $auto_import_clause_re = 
   qr{^ \#\! \s* autoimport \s* { [^\n]* \n
@@ -89,20 +89,20 @@ our $perl_unbalanced_delimited_block_re = compile_regexp(
 
 our $perl_delimited_block_re = compile_regexp(
   qr{(?|
-        (?: (\() ($inside_of_parens_re) \) ) |
-        (?: (\{) ($inside_of_braces_re) \} ) |
-        (?: (\[) ($inside_of_square_brackets_re) \] ) |
-        (?: (\<) ($inside_of_angle_brackets_re) \> ) |
+        (?: (\() ($inside_parens_re) \) ) |
+        (?: (\{) ($inside_braces_re) \} ) |
+        (?: (\[) ($inside_square_brackets_re) \] ) |
+        (?: (\<) ($inside_angle_brackets_re) \> ) |
         $perl_unbalanced_delimited_block_re
       )
      }oamsx, 'perl_delimited_block'); 
 
 our $perl_delimited_block_pair_re = compile_regexp(
   qr{(?|
-        (?> \( $inside_of_parens_re \) \( $inside_of_parens_re \) ) |
-        (?> \{ $inside_of_braces_re \} \{ $inside_of_braces_re \} ) |
-        (?> \[ $inside_of_square_brackets_re \] \[ $inside_of_square_brackets_re \] ) |
-        (?> \[ $inside_of_angle_brackets_re \] \[ $inside_of_angle_brackets_re \] ) |
+        (?> \( $inside_parens_re \) \( $inside_parens_re \) ) |
+        (?> \{ $inside_braces_re \} \{ $inside_braces_re \} ) |
+        (?> \[ $inside_square_brackets_re \] \[ $inside_square_brackets_re \] ) |
+        (?> \[ $inside_angle_brackets_re \] \[ $inside_angle_brackets_re \] ) |
         (?> ($unbalanced_symbol_chars_re) .*? \g{-1} .*? \g{-1})
       )
      }oamsx, 'perl_delimited_block_pair'); 
@@ -330,7 +330,7 @@ our $perl_constant_to_value_mapping_re = compile_regexp(
 our $perl_constant_decl_re = compile_regexp(
   qr{\b use \s+ (constant) \s*
       (?|
-        (?: \{ ($inside_of_braces_re) \} ; (*:const_decl_list)) |
+        (?: \{ ($inside_braces_re) \} ; (*:const_decl_list)) |
         (?: ([^;]+) ; (*:const_decl))
       )
      }oamsx, 'perl_constant_decl');

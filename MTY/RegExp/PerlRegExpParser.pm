@@ -351,16 +351,16 @@ sub get_tokenized_regexp_metadata($$) {
   }
 
   my $metadata = {
-    modifiers                 => $modifiers,
-    characters                => length($resrc),
+    modifiers                 => $modifiers // '',
+    characters                => length($resrc // $re),
     tokens                    => scalar(@$tokens),
     cap_groups                => $capture_group_count,
     structural_groups         => $structural_group_count,
     cap_groups                => $capture_group_count,
     named_cap_groups          => $named_capture_group_count,
     numbered_cap_groups       => $numbered_capture_group_count,
-    anchored_string           => $anchored,
-    floating_string           => $floating
+    anchored_string           => $anchored // '',
+    floating_string           => $floating // ''
   };
 
   return $metadata;

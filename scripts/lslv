@@ -254,8 +254,8 @@ foreach $vg (@vgs) {
   my $vg_online = $vginfo->{vg_online};
 
   my $vglabel = [ 
-    [ TREE_CMD_SYMBOL, ($vg_online) ? C.double_disc_black : C_1_2.double_disc ],
-    (($vg_online) ? C_2_3 : C_1_2).'VG '.(($vg_online) ? U.C : C_1_2).$vg.UX,
+    [ TREE_CMD_SYMBOL, ($vg_online) ? C.double_disc_black : C.double_disc ],
+    C_2_3.'VG '.(($vg_online) ? U.C : C).$vg.UX,
   ];
   
   if ($show_pv_summary_on_vg_line) {
@@ -282,8 +282,8 @@ foreach $vg (@vgs) {
       my $pv_uuid = $pv_to_uuid{$pv} // '?';
       my $pv_online = $vg_online;
       my $pvnode = [ 
-        [ TREE_CMD_SYMBOL, (($pv_online) ? Y.single_disc : R.circle_with_shadow) ],
-        (($pv_online) ? Y_1_2.'PV '.Y.$pv.' ' : R_1_2.'PV '.$pv.' '),
+        [ TREE_CMD_SYMBOL, (($pv_online) ? Y.single_disc : Y.circle_with_shadow) ],
+        Y_1_2.'PV '.Y.$pv.' ',
         [ TREE_CMD_FIELD ],
         Y.padstring(format_size_with_units($pv_size, $max_size_digits, $yellow_comma_sep_sym, Y_1_2.' '), -12).K.'  ',
         [ TREE_CMD_FIELD ],
@@ -321,8 +321,8 @@ foreach $vg (@vgs) {
       ' '.rgbfgM.$lv->{seg_count}.M_1_2.' segs  ' : (' ' x 11);
 
     my $lvnode = [ 
-      [ TREE_CMD_SYMBOL, (($lv_online) ? (($lv->{lv_open} ? $lv_opened_color : $dark_lv_opened_color).$seg_count_symbol) : R_2_3.x_in_box) ],
-      (($lv_online) ? ($lv_opened_color.($lv->{lv_open} ? U : '')) : (R_1_2)).$lv->{lv_name}.UX.X.'  ',
+      [ TREE_CMD_SYMBOL, ($lv->{lv_open} ? $lv_opened_color : $dark_lv_opened_color).($lv_online ? $seg_count_symbol : x_in_box) ],
+      $lv_opened_color.($lv->{lv_open} ? U : '').$lv->{lv_name}.UX.X.'  ',
       [ TREE_CMD_FIELD ],
       G.padstring(format_size_with_units($lv->{lv_size}, $max_size_digits, $green_comma_sep_sym, G_1_2.' '), -12).'  ',
       [ TREE_CMD_FIELD ],
@@ -335,6 +335,8 @@ foreach $vg (@vgs) {
 
     push @$vgnode, [ $lvnode ];
   }
+
+  if (!$vg_online) { $vgnode = scale_rgb_fg_in_array_recursively($vgnode, 0.60); }
 }
 
 print_tree($rootnode);

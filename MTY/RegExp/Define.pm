@@ -148,7 +148,7 @@ sub generate_regexp_to_match_any_string_in_list(+) {
 #
 
 #my $regexp_backticks_to_Q_E_pair_re = qr{\` ((?: [^\`] | \\ \`)*+) \`}oamsx;
-#my $regexp_braces_to_paren_q_c_re = qr{\{ ($inside_of_braces_re) \}}oamsx;
+#my $regexp_braces_to_paren_q_c_re = qr{\{ ($inside_braces_re) \}}oamsx;
 #my $regexp_lt_num_a_b_gt_to_braces_re = qr{\<\# ([0-9\,]+) \>}oamsx;
 
 sub compile_regexp_ext($;$$+) {
