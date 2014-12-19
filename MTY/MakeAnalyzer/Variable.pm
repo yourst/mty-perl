@@ -41,7 +41,6 @@ my %var_origin_to_color = (
 
 sub format_variable(+) {
   my ($v) = @_;
-  # local (*v) = \ (@_);
 
   my $color = $var_origin_to_color{$v->{origin}} // $Y;
 
@@ -84,7 +83,6 @@ sub format_variable(+) {
 
 sub print_variables(+;$$) {
   my ($variables, $fd) = @_;
-  # local (*variables, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -105,7 +103,6 @@ my $exclude_variable_names_from_path_map_re =
 
 sub create_reverse_map_of_path_variable_values_to_names(+;+) {
   my ($variables, $revmap) = @_;
-  # local (*variables, *revmap) = \ (@_);
 
   $revmap //= { };
   my $varcount = 0;
@@ -167,7 +164,6 @@ sub create_reverse_map_of_path_variable_values_to_names(+;+) {
 
 sub print_variables_in_category(+$;$) {
   my ($varlist, $category, $fd) = @_;
-  # local (*varlist, *category, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -181,7 +177,6 @@ sub print_variables_in_category(+$;$) {
 
 sub print_variables_in_all_categories(+;$) {
   my ($categories, $fd) = @_;
-  # local (*categories, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -197,7 +192,6 @@ my $variable_summary_format =
 
 sub print_summary_of_variable(+;$$) {
   my ($v, $fd, $filenames_relative_to_dir_re) = @_;
-  # local (*v, *fd, *filenames_relative_to_dir_re) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -220,7 +214,6 @@ sub print_summary_of_variable(+;$$) {
 
 sub print_summary_of_variables(+;$$) {
   my ($variables, $categories, $fd) = @_;
-  # local (*variables, *categories, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -235,7 +228,6 @@ sub print_summary_of_variables(+;$$) {
 
 sub dump_variable(+) {
   my ($v) = @_;
-  # local (*v) = \ (@_);
 
   my $value = $v->{value};
 
@@ -273,7 +265,6 @@ sub dump_variable(+) {
 
 sub dump_variables_in_category(+$) {
   my ($varlist, $category) = @_;
-  # local (*varlist, *category) = \ (@_);
 
   my $out = NL.'#'.NL.'# '.$category.': '.
     scalar(@$varlist).' variables:'.NL.'#'.NL.NL;

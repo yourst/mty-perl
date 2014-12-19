@@ -1,8 +1,12 @@
 MTY/Common/Cache.pm
 MTY/Common/CommandLine.pm
 MTY/Common/Common.pm
+MTY/Common/CoreOverride.pm
+MTY/Common/EnvVarDefaults.pm
+MTY/Common/GlobalOverride.pm
 MTY/Common/Hashes.pm
 MTY/Common/Strings.pm
+MTY/Devel/ModuleTracer.pm
 MTY/Display/ANSIColorREs.pm
 MTY/Display/ColorCapabilityCheck.pm
 MTY/Display/Colorize.pm
@@ -12,9 +16,12 @@ MTY/Display/PPITreeFormatter.pm
 MTY/Display/PrintableSymbolTools.pm
 MTY/Display/PrintableSymbols.pm
 MTY/Display/Scrollable.pm
+MTY/Display/SimpleColorize.pm
+MTY/Display/Table.pm
 MTY/Display/TextInABox.pm
 MTY/Display/Tree.pm
 MTY/Filesystem/BtrFS.pm
+MTY/Filesystem/CurrentDir.pm
 MTY/Filesystem/EnhancedFileStats.pm
 MTY/Filesystem/ExtAttrs.pm
 MTY/Filesystem/ExtentMap.pm
@@ -23,8 +30,10 @@ MTY/Filesystem/Files.pm
 MTY/Filesystem/Ioctl.pm
 MTY/Filesystem/Mounts.pm
 MTY/Filesystem/OpenFiles.pm
+MTY/Filesystem/PathCache.pm
 MTY/Filesystem/ProcFS.pm
 MTY/Filesystem/SearchableDirList.pm
+MTY/Filesystem/StatsCache.pm
 MTY/MakeAnalyzer/Common.pm
 MTY/MakeAnalyzer/Log.pm
 MTY/MakeAnalyzer/MakeDatabaseParser.pm
@@ -44,6 +53,7 @@ MTY/RegExp/Networks.pm
 MTY/RegExp/Numeric.pm
 MTY/RegExp/PerlRegExpParser.pm
 MTY/RegExp/PerlSyntax.pm
+MTY/RegExp/PrefixStrings.pm
 MTY/RegExp/Strings.pm
 MTY/RegExp/Tools.pm
 MTY/System/Misc.pm

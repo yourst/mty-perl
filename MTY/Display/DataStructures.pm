@@ -105,7 +105,6 @@ sub format_var($+) {
 
 sub print_var($+;$) {
   my ($name, $obj, $fd) = @_;
-  # local (*name, *obj, *fd) = \ (@_);
 
   $fd //= STDOUT;
   print($fd format_var($name, $obj).NL);

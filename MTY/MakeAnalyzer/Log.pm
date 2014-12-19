@@ -31,7 +31,6 @@ use MTY::MakeAnalyzer::Common;
 
 sub print_formatted_make_log($;$) {
   my ($text, $fd) = @_;
-  # local (*text, *fd) = \ (@_);
 
   $fd //= STDOUT;
 

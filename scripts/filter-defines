@@ -75,9 +75,6 @@ use MTY::RegExp::Numeric;
 use MTY::RegExp::Strings;
 use MTY::RegExp::CxxREs;
 
-use Cwd qw(realpath);
-use File::Basename qw(dirname);
-
 my $DEBUG = 0;
 
 use constant {

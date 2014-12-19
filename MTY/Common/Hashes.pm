@@ -47,10 +47,7 @@ sub array_to_hash_keys(+;$) {
   $value //= 1;
 
   # Pre-expand the hash to comfortably fit all the keys:
-  my %h = ( );
-  prealloc(%h, $key_array_ref);
-
-  foreach my $k (@{$key_array_ref}) { $h{$k} = $value; }
+  my %h = (map { ($_, $value) } @$key_array_ref);
   return (wantarray ? %h : \%h);
 }
 

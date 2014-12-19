@@ -302,7 +302,7 @@ sub parse_btrfs_subvol_attrs($;$) {
   local ($input, $fs_root) = @_;
   $fs_root = $_[1] // '/';
   my $fs_root_prefix = ($fs_root =~ s{/$}{}roaxg).'/';
-  #print("input => [$input] => path [$path] vs fs_rt [$fs_root_prefix] [$fs_root]\n");
+
   if (my ($id, $gen, $creation_gen, $parent_id, 
           $toplevel_id, $parent_uuid, $uuid, $path) =
             ($input =~ /$btrfs_subvol_list_re/oamsxg)) {
@@ -342,14 +342,12 @@ sub query_btrfs_subvols(;$) {
   %subvols = ( );
 
   my $root_subvol_attrs = get_root_subvol_attrs($fs_root);
-  #print(format_subvol_attrs_as_env_vars($root_subvol_attrs));
 
   $subvols{'/'} = $root_subvol_attrs;
 
   @subvol_list_to_parse = run_btrfs_command(qw(subvolume list -a -p -c -g -u -q), $fs_root);
 
   foreach $s (@subvol_list_to_parse) {
-    #print("[$s]\n");
     my $h = parse_btrfs_subvol_attrs($s, $fs_root);
     die unless (defined($h));
     #$h->{fs_uuid} = $root_subvol_attrs->{fs_uuid};

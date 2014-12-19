@@ -9,7 +9,7 @@ default: all
 
 .PHONY: default sync-modules install-modules sync-scripts install-scripts sync install-without-sync install info clean all
 
-GENERATED_MAKE_INCLUDES := build/perl-version.mk build/modules.mk build/perl-scripts.mk build/deps.mk
+GENERATED_MAKE_INCLUDES := build/perl-config.mk build/modules.mk build/perl-scripts.mk build/deps.mk
 
 include functions.mk
 
@@ -28,22 +28,35 @@ INSTALLED_PERL_SCRIPTS_DIR := /usr/local/bin
 
 ifndef SKIP_MAKE_INCLUDES
 
-# Set the following make variables related to the local Perl installation:
-PERL_CONFIG_VARS := PERL_VERSION PERL_PERLPATH PERL_SITELIB PERL_SITEARCH PERL_ARCHNAME PERL_MODULE_DIRS PERL_MODULES PERL_SCRIPTS
-QUERY_PERL_VER_AND_DIR := 'use Config; foreach my $$k (qw(version sitelib sitearch archname)) { print("PERL_".uc($$k)." := ".$$Config{$$k}."\t"); }'
+#----------------------------------------------------------------------------+
+# Determine the current Perl version and its standard library directories:   +
+#----------------------------------------------------------------------------+
 
--include build/perl-version.mk
+-include build/perl-config.mk
+
+PERL_CONFIG_VARS := VERSION ARCHNAME PERLPATH SITELIB SITEARCH 
+
+define get_perl_config_script
+use Config;
+foreach my $$k (qw(${PERL_CONFIG_VARS})) 
+  { print("PERL_".uc($$k)." := ".$$Config{lc($$k)}."\n"); }
+endef # get_perl_config_script
+
 ifeq (,${PERL_VERSION})
-PERL_VERSION_OUTPUT := $(subst ${TAB},${NL},$(shell perl -e ${QUERY_PERL_VER_AND_DIR}))
-$(eval ${PERL_VERSION_OUTPUT})
-endif # ! PERL_VERSION
-
-build:
-	@mkdir -p build
-
-build/perl-version.mk: ${PERLPATH} | build
-	$(call print_build,(config),Running under Perl version ${PERL_VERSION} (${PERL_PERLPATH}, ${PERL_SITELIB} on ${PERL_ARCHNAME}))
-	$(file >$@,${PERL_VERSION_OUTPUT})
+# Build perl-config.mk for the first time:
+$(info Querying and caching current Perl configuration details...)
+$(shell mkdir -p build && perl -e '${get_perl_config_script}' > build/perl-config.mk)
+include build/perl-config.mk
+ifeq (,${PERL_VERSION})
+$(error Cannot query Perl configuration - is Perl installed?)
+endif # (missing PERL_* definitions)
+$(foreach var,$(addprefix PERL_,${PERL_CONFIG_VARS}),$(info - ${var}${TAB}= ${${var}}))
+else # PERL_VERSION is set
+# Declare a rule to ensure perl-config.mk is rebuilt 
+# if the perl version and/or paths have changed:
+build/perl-config.mk: ${perl_perlpath} Makefile | build
+	perl -e '${get_perl_config_script}' > $@
+endif # PERL_VERSION
 
 #
 # PERL_MODULES / MTY/build/modules.mk (persistent cached make variable)
@@ -66,10 +79,10 @@ ifdef GENERATE_MODULES_LIST
 # PERL_MODULES += ${PERL_BUNDLE_MODULES}
 endif
 
-build/modules.mk: ${PERL_MODULE_DIRS} build/perl-version.mk | build
+build/modules.mk: ${PERL_MODULE_DIRS} build/perl-config.mk | build
 	$(file >$@,PERL_MODULES := ${PERL_MODULES})
 
-build/modules.list: ${PERL_MODULE_DIRS} build/perl-version.mk | build
+build/modules.list: ${PERL_MODULE_DIRS} build/perl-config.mk | build
 	$(file >$@,$(subst ${SPACE},${NL},${PERL_MODULES}))
 
 #
@@ -80,10 +93,10 @@ ifeq (,${PERL_SCRIPTS})
 PERL_SCRIPTS := $(call find_scripts_handled_by_interpreter,perl,scripts/*)
 endif # ! PERL_SCRIPTS
 
-build/perl-scripts.mk: scripts build/perl-version.mk | build
+build/perl-scripts.mk: scripts build/perl-config.mk | build
 	$(file >$@,PERL_SCRIPTS := ${PERL_SCRIPTS}) 
 
-build/perl-scripts.list: scripts build/perl-version.mk | build
+build/perl-scripts.list: scripts build/perl-config.mk | build
 	$(file >$@,$(subst ${SPACE},${NL},$(notdir ${PERL_SCRIPTS})))
 
 #
@@ -122,7 +135,7 @@ endif # ! DEPS_AVAILABLE
 find_updated_modules = $(filter ${PERL_MODULES},${1})
 find_updated_scripts = $(filter ${PERL_SCRIPTS},${1})
 
-build/deps.mk: ${PERL_MODULES} ${PERL_SCRIPTS} build/modules.mk build/perl-scripts.mk build/perl-version.mk 
+build/deps.mk: ${PERL_MODULES} ${PERL_SCRIPTS} build/modules.mk build/perl-scripts.mk build/perl-config.mk 
 	$(eval UPDATED_MODULES := $(call find_updated_modules,$?))
 	$(eval UPDATED_SCRIPTS := $(call find_updated_scripts,$?))
 	$(if ${UPDATED_MODULES},$(call print_build,(status),$(words ${UPDATED_MODULES}) out-of-date Perl modules:${NL}$(call summarize_paths_across_lines,$(patsubst MTY/%,%,${UPDATED_MODULES}),${TAB}${TAB} - )))
@@ -201,7 +214,7 @@ info:
 #
 distclean:
 	$(call print_build,DISTCLEAN,Cleaning and removing temporary files prior to distribution)
-	@rm -f -v build/perl-version.mk build/perl-mod-deps*.log
+	@rm -f -v build/perl-config.mk build/perl-mod-deps*.log
 
 clean:
 	$(call print_build,CLEAN,Cleaning and removing all generated files)

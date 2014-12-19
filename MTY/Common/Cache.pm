@@ -8,7 +8,7 @@
 # the corresponding value and then stores this in the cache. Also
 # provides methods for flushing the cache or specific keys.
 #
-# Copyright 1997 - 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::Common::Cache;
@@ -77,14 +77,16 @@ noexport:; sub set_generator(+&) {
 }
 
 noexport:; sub get_stats(+) {
-  return @{$_[0]}[hits, misses, flushes];
+  my ($this) = @_;
+  my $hash = $this->[hash];
+  return @{$_[0]}[hits, misses, flushes, scalar keys %$hash];
 }
 
 noexport:; sub get_using(+$;$@) {
   my ($this, $key, $generator, @args) = @_;
   my $cache = $this->[hash];
 
-  if (exists $cache->{$key}) {    
+  if (exists $cache->{$key}) {
     $this->[hits]++;
     return ((wantarray) ? ($cache->{$key}, 1, \($cache->{$key})) : $cache->{$key});
   }
@@ -132,7 +134,7 @@ noexport:; sub get(+$;@) {
 noexport:; sub probe(+$;@) { 
   my ($this, $key) = @_;
   my $h = $this->[hash];
-  if (!exists $h->{$key}) { return (wantarray ? (undef, 0) : undef); }
+  if ((!defined $key) || (!exists $h->{$key})) { return (wantarray ? (undef, 0) : undef); }
   return (wantarray ? ($h->{$key}, 1) : $h->{$key});
 }
 
@@ -198,6 +200,11 @@ noexport:; sub flush(+) {
   return $n;
 }
 
+noexport:; sub get_hash(+) {
+  my ($this) = @_;
+  return $this->[hash];
+}
+
 #
 # Returns a list of the form (value, key_exists_in_hash):
 #
@@ -220,55 +227,5 @@ sub query_hash(+$) {
   if (defined $v) { return ($v, 1); }	
   return (undef, ((exists $hash->{$key}) ? 1 : 0));
 }
-
-
-#use overload '${}' => sub { \(query_and_update($_[0], $_[1])); }, fallback => TRUE;
-#use overload '${}' => sub { 
-#  my ($v, $hit, $vref) = query_and_update($_[0], $_[1]); 
-#  return $vref; 
-#};
-#use overload fallback => TRUE;
-
-# sub DEBUG_get_using(+$;$@) {
-#   my ($this, $key, $generator, @args) = @_;
-# 
-#   $generator //= $this->[generator];
-#   my $cache = $this->[hash];
-# 
-#   my $debug_label;
-#   if (DEBUG_QUERY_AND_UPDATE_CACHE) {
-#     $debug_label = $this.' ('.
-#       ($this->[label] // '<unknown label>').' -> ';
-#   }
-#   
-#   if (!defined $generator) 
-#     { die($this.' has no registered generator, and none was specified'); }
-# 
-#   if (DEBUG_QUERY_AND_UPDATE_CACHE) {
-#     print(STDERR $debug_label.'query_and_update_using("'.$key.
-#           '", '.$generator.') = ');
-#   }
-# 
-#   $this->[probes]++; # update probe count
-#   my $v = $cache->{$key};
-# 
-#   if ((defined $v) || (exists $cache->{$key})) { 
-#     if (DEBUG_QUERY_AND_UPDATE_CACHE) 
-#       { print(STDERR "found value ".($v // '<undef>')."]".NL); }
-#     $this->[hits]++; # update hit count
-#     return ((wantarray) ? ($v, 1, \($cache->{$key})) : $v); 
-#   }
-# 
-#   if (DEBUG_QUERY_AND_UPDATE_CACHE) 
-#     { print(STDERR 'calling generator ('.$key.', '.join(', ', @args).') => '.NL); }
-# 
-#   $v = $generator->($this, $key, @args);
-#   $cache->{$key} = $v;
-# 
-#   if (DEBUG_QUERY_AND_UPDATE_CACHE) 
-#     { print(STDERR " => generator returned ".($v // '<undef>')."]".NL); }
-# 
-#   return (wantarray ? ($v, 0, \($cache->{$key})) : $v);
-# }
 
 1;

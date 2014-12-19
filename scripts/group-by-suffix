@@ -1,9 +1,10 @@
 #!/usr/bin/perl -w
 # -*- cperl -*-
 #
-# group-by-suffix: condense long lists of filenames or domain names
-# by finding redundant suffixes and grouping together all prefixes
-# with those suffixes, either as e.g.:
+# group-by-suffix, group-by-prefix: condense long lists of filenames,
+# IP addresses or domain names by finding redundant prefixes or suffixes
+# and grouping together all prefixes with those suffixes (or vice versa),
+# either as e.g.:
 #
 #   1st.a 2nd.a 3rd.b 4th.b 5th.b    =>  {1st 2nd}.a {3rd 4th 5th}.b
 #
@@ -30,6 +31,7 @@ use MTY::RegExp::Analyzer;
 
 my $fancy_output = is_stdout_color_capable();
 
+my $group_by_prefixes = 0;
 my $sep = '.';
 my $suffix_count = undef;
 # my $divider = ($fancy_output) ? dashed_vert_bar_3_dashes : ' ';
@@ -43,9 +45,10 @@ my $no_color = 0;
 my $read_from_stdin = (! -t 0);
 
 my %command_line_options = (
+  'prefixes' => [ \$group_by_prefixes, 0, ['p'] ],
   'separator' => [ \$sep, OPTION_VALUE_REQUIRED, ['sep', 's'] ],
   'suffix-count' => [ \$suffix_count, OPTION_VALUE_REQUIRED, ['n'] ],
-  'divider' => [ \$divider, OPTION_VALUE_REQUIRED, ['p', 'd'] ],
+  'divider' => [ \$divider, OPTION_VALUE_REQUIRED, ['d'] ],
   'brackets' => [ \$bracket_style, OPTION_VALUE_REQUIRED, ['b'] ],
   'linesep' => [ \$line_separator, 0, ['l'] ],
   'split-only' => [ \$split_only, 0, ['o', 'so', 'split'] ],
@@ -75,7 +78,9 @@ if ($read_from_stdin) {
 
 my ($left_bracket_style, $right_bracket_style) = split(//, $bracket_style);
 
-my $suffixes_re = generate_suffix_regexp('.', $suffix_count);
+my $suffixes_re = ($group_by_prefixes) 
+  ? generate_prefix_regexp('.', $suffix_count)
+  : generate_suffix_regexp('.', $suffix_count);
 
 my %suffixes_to_prefix_list = ( );
 

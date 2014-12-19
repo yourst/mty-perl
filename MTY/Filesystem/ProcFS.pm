@@ -41,8 +41,8 @@ use MTY::Filesystem::FileStats;
 use MTY::Common::Strings;
 use MTY::RegExp::Define;
 
-my $null_sep_re = qr{\000}oax;
-my $space_or_null_sep_re = qr{[\s\000]+}oax;
+my $null_sep_re = qr{\0}oax;
+my $space_or_null_sep_re = qr{[\s\0]+}oax;
 my $newline_sep_re = qr{\n}oax;
 
 # Keep a cached file handle to /proc open at all times

@@ -723,7 +723,6 @@ sub parse_module(+) {
 #------------------------------------------------------------------------------
 sub resolve_symbol_and_module_dependency_graphs(++) {
   my ($all_exported_symbol_names, $all_modules) = @_;
-  # local (*all_exported_symbol_names, *all_modules) = \ (@_);
 
   $max_symbol_name_length = maxlength(@$all_exported_symbol_names);
   
@@ -794,7 +793,6 @@ sub resolve_symbol_and_module_dependency_graphs(++) {
 #------------------------------------------------------------------------------
 sub print_symbol_dependencies(+;$$) {
   my ($symbol_names, $fd, $fancy_format) = @_;
-  # local (*symbol_names, *fd, *fancy_format) = \ (@_);
 
   $fd //= STDERR;
   $fancy_format //= is_stderr_color_capable();
@@ -825,7 +823,6 @@ sub print_symbol_dependencies(+;$$) {
 #------------------------------------------------------------------------------
 sub print_module_dependencies(+;$$) {
   my ($module_refs, $fd, $fancy_format) = @_;
-  # local (*module_refs, *fd, *fancy_format) = \ (@_);
 
   $fd //= STDERR;
   $fancy_format //= is_stderr_color_capable();
@@ -1134,7 +1131,6 @@ sub generate_exports_decl($;$) {
 
 sub generate_module_bundle(+$) {
   my ($modules, $bundle_name) = @_;
-  # local (*modules, *bundle_name) = \ (@_);
 
   my $filename = '/dev/stdout';
 
@@ -1331,7 +1327,6 @@ sub generate_module_bundle(+$) {
 
 sub update_auto_imports(+) {
   my ($m) = @_;
-  # local (*m) = \ (@_);
 
 
   #$longest_import_mod_name = max($longest_import_mod_name, maxlength($m->{imported_module_names});
@@ -1380,7 +1375,6 @@ sub update_auto_imports(+) {
 #------------------------------------------------------------------------------
 sub generate_makefile_deps(+;$) {
   my ($modlist, $prefix) = @_;
-  # local (*modlist, *prefix) = \ (@_);
 
   my $out = '';
 
@@ -1409,7 +1403,6 @@ sub generate_makefile_deps(+;$) {
 #------------------------------------------------------------------------------
 sub write_updated_file($) {
   my ($m) = @_;
-  # local (*m) = \ (@_);
 
 
   my $changed_anything = ($m->{code} ne $m->{origcode});

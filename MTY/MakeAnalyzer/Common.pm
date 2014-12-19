@@ -35,6 +35,7 @@ use MTY::Common::Hashes;
 use MTY::Common::Strings;
 use MTY::Filesystem::Files;
 use MTY::RegExp::Define;
+use MTY::RegExp::PrefixStrings;
 use MTY::Display::Colorize;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;
@@ -68,7 +69,6 @@ my %existing_dir_path_cache = ( );
 
 noexport:; sub replace_file_path_with_formatted_file_path($) {
   my ($path) = @_;
-  # local (*path) = \ (@_);
   my $dir = directory_of($path);
   my $is_real_dir = query_and_update_cache(%existing_dir_path_cache, $dir, sub { (-e $_[0]) ? 1 : 0; });
   return ($is_real_dir ? format_file_path($path) : $path);
@@ -76,7 +76,6 @@ noexport:; sub replace_file_path_with_formatted_file_path($) {
 
 sub format_file_paths_within_string($) {
   my ($s) = @_;
-  # local (*s) = \ (@_);
 
   #print(STDERR '[format_file_paths_within_string ['.$s.'] ]'.NL);
   $s =~ s{$filesystem_path_including_directory_re}{replace_file_path_with_formatted_file_path($1)}oamsxge;
@@ -134,7 +133,6 @@ our %known_strings_with_path_prefixes_replaced = ( );
 
 sub prepare_path_prefixes_to_replacements(+) {
   my ($mapping) = @_;
-  # local (*mapping) = \ (@_);
 
 
   $path_prefixes_re = prepare_prefix_string_subst_regexp(keys %$mapping);
@@ -160,7 +158,6 @@ sub prepare_path_prefixes_to_replacements(+) {
 
 sub subst_path_prefix_strings($;$$) {
   my ($v, $color, $uniqifier) = @_;
-  # local (*v, *color, *uniqifier) = \ (@_);
 
   my $key = $v;
   $v .= $uniqifier if (defined $uniqifier);
@@ -249,7 +246,6 @@ our $cwd_re;
 
 sub print_summary_of_categories(+$;$) {
   my ($categories, $targets_or_variables, $fd) = @_;
-  # local (*categories, *targets_or_variables, *fd) = \ (@_);
 
 
   my $cwd = getcwd();
@@ -279,7 +275,6 @@ sub print_summary_of_categories(+$;$) {
 
 sub print_summary_of_make_database(++;++$) {
   my ($variables, $targets, $variable_categories, $target_categories, $fd) = @_;
-  # local (*variables, *targets, *variable_categories, *target_categories, *fd) = \ (@_);
 
   $fd //= STDOUT;
   print_summary_of_targets($targets, $target_categories, $fd);

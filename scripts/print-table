@@ -19,6 +19,7 @@ use MTY::Common::CommandLine;
 use MTY::Filesystem::Files;
 use MTY::Display::Colorize;
 use MTY::Display::PrintableSymbols;
+use MTY::Display::Table;
 use MTY::RegExp::Tools;
 use MTY::RegExp::Strings;
 use MTY::System::POSIX;
@@ -58,4 +59,4 @@ foreach my $line (@lines) {
 
 if (!@alignments) { @alignments = (ALIGN_LEFT); }
 
-print_columns(STDOUT, @table, '  ', '  ', NL, @alignments, $max_line_width);
+print_table(STDOUT, @table, colseps => '  ', row_prefix => '  ', align => @alignments, clip_to_length => $max_line_width);

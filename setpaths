@@ -2,6 +2,7 @@
 
 SCRIPTNAME=setpaths
 PROJECT=mty-perl
+
 if [[ $0 =~ ${SCRIPTNAME} ]]; then
   echo
   echo "The ${SCRIPTNAME} script must be sourced into the current shell using:"
@@ -21,7 +22,7 @@ case "$1" in
     export PS1=$PREVIOUS_PS1
     unset CURRENT_PROJECT PREVIOUS_MAKEFLAGS PREVIOUS_PERLLIB PERVIOUS_PATH PREVIOUS_PS1
     echo
-    echo 'Removed all ${PROJECT} build environment settings'
+    echo "Removed all ${PROJECT} build environment settings"
     echo
     return 0
     ;;
@@ -55,7 +56,10 @@ alias make='make $MAKEFLAGS'
 shopt -q -s globstar dotglob gnu_errfmt sourcepath xpg_echo
 shopt -q -u checkjobs
 
-[[ ! $PS1 =~ \(${PROJECT}\) ]] && export PS1=${PS1//\\u/\\u $B(${PROJECT})$K}
+export MTY_Display_ColorizeErrorsAndWarnings='abort_on_warnings=1'
+
+[[ -r scripts/colorize.sh ]] && . scripts/colorize.sh
+[[ ! $PS1 =~ \(${PROJECT}\) ]] && export PS1=${PS1/\\u/\\u ${B}(${PROJECT})}
 
 scripts/text-in-a-box -style=rounded -color=B \
   "%G%{sym=checkmark} %YSet up your shell environment for %C%U${PROJECT}%!U%Y development:%X" \

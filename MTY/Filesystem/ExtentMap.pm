@@ -70,7 +70,7 @@ package FIEMAPExtentStruct {
     
     my $this = {
       fe_logical => $fe_logical // 0,
-      fe_physical => $fe_physical // LONG_MAX,
+      fe_physical => $fe_physical // MTY::System::POSIX::LONG_MAX,
       fe_length => $fe_length // 0,
       fe_flags => $fe_flags // 0,
     };
@@ -147,7 +147,7 @@ package FIEMAPStruct {
     
     my $this = {
       fm_start => $fm_start // 0,
-      fm_length => $fm_length // LONG_MAX,
+      fm_length => $fm_length // MTY::System::POSIX::LONG_MAX,
       fm_flags => $fm_flags // 0,
       fm_mapped_extents => $fm_mapped_extents // 0,
       fm_extent_count => $fm_extent_count // 0,
@@ -292,8 +292,8 @@ sub print_extents(+) {
     ALIGN_LEFT, ALIGN_LEFT
   );
   
-  print($outfd format_columns(@table, '  ', '  ', NL, @alignments));
-
+  print($outfd format_table(@table, colseps => '  ', row_prefix => '  ', align => @alignments));
+  
   return \@table;
 }
 

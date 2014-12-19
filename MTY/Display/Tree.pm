@@ -94,6 +94,7 @@ use MTY::Display::ANSIColorREs;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;
 use MTY::Display::TextInABox;
+use MTY::Display::Table;
 use MTY::RegExp::Define;
 use MTY::RegExp::Tools;
 use MTY::RegExp::Blocks;
@@ -358,7 +359,7 @@ noexport:; sub subtree_to_text {
       $branch_to_root_style, $branch_color, 
       $parent_branch_color, $node_indicator, 
       $leaf_indicator, $horiz_dashed, $vert_dashed) = @_;
-
+  
   $prefix //= '';
 
   my $nodecount = 0;
@@ -398,7 +399,7 @@ noexport:; sub subtree_to_text {
     my $subnode_count = ($is_array_node ? scalar(@$node)-1 : 0);
     
     my ($per_line_header, $fields) = subtree_label(
-      $chunks, $subnode, $tree_leading_space,
+      $chunks, $node, $tree_leading_space,
       \$branch_to_node_style, \$branch_to_leaf_style,
       \$branch_color, \$node_indicator, \$leaf_indicator,
       \$horiz_dashed, \$vert_dashed, scalar(@$out));
@@ -498,7 +499,7 @@ noexport:; sub tree_to_lines {
     $branch_color, $parent_branch_color, $node_indicator, $leaf_indicator,
     $horiz_dashed, $vert_dashed);
 
-  my @out = format_columns($rows_and_columns, ' ', '', NL, ALIGN_LEFT);
+  my @out = format_table($rows_and_columns, clip_above_percentile => 99.5, min_length_ratio_if_above_percentile => 1.5);
 
   return (wantarray ? @out : \@out);
 }

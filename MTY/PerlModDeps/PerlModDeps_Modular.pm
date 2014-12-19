@@ -288,7 +288,6 @@ my $double_colon_re = qr{\:\:}oax;
 
 sub format_module_name($;$) {
   my ($name, $color) = @_;
-  # local (*name, *color) = \ (@_);
 
   $color //= $X;
 
@@ -327,7 +326,6 @@ my $default_bundle_name = 'ALL';
 
 sub create_auto_import_prefixes_from_mod_path(+) {
   my ($list) = @_;
-  # local (*list) = \ (@_);
 
   my @out = ( );
   my $DEBUG = 0;
@@ -342,8 +340,8 @@ sub create_auto_import_prefixes_from_mod_path(+) {
 
     foreach $f (@$files_and_subdirs) {
       next if ($f =~ /^\./oamsx); # skip dot files + . and .. dirs
-      $f = realpath($p.'/'.$f);
-      my ($basename, $dir, $suffix) = fileparse($f);
+      $f = resolve_path($p.'/'.$f);
+      my ($basename, $dir, $suffix) = split_path_version_aware($f);
       $dir //= ''; $suffix //= '';
       if ($DEBUG) {
         print(STDERR $G.'   '.checkmark.' '.$K.'dir '.$Y.$dir.$K.' name '.$C.$basename.$K);
@@ -351,9 +349,6 @@ sub create_auto_import_prefixes_from_mod_path(+) {
         print(STDERR $B.' '.large_arrow_barbed.' ');
       }
       
-      # only consider link target to get file type; ignore its name, since the user
-      # may have intentionally symlinked certain packages to different names:
-      if (-l $f) { $f = realpath(readlink($f)); }
       # ignore files and dirs that aren't valid package names
       if ($basename !~ /^\w+$/) {
         if ($DEBUG) { print(STDERR $K.' (skipped - not a valid package name)'.$X.NL); }
@@ -441,7 +436,6 @@ my %bundle_name_to_list_of_modules = ( );
 
 sub read_and_check_file($$) {
   my ($m, $warning_prefix) = @_;
-  # local (*m, *warning_prefix) = \ (@_);
 
   my $filename = $m->{filename};
 
@@ -519,7 +513,6 @@ my %special_label_names = (
 
 sub extract_constants($;+) {
   my ($node, $constants) = @_;
-  # local (*node, *constants) = \ (@_);
 
   $constants //= [ ];
 
@@ -564,7 +557,6 @@ my $equals_prefixed_constant_flag_re = qr{^\=(\w+)$}oax;
 
 sub check_for_same_export_name_in_other_modules_and_add($$$$;$) {
   my ($name, $export_optional, $export_tag_label, $m, $node) = @_;
-  # local (*name, *export_optional, *export_tag_label, *m, *node) = \ (@_);
 
 
   my $name_prefix = '';
@@ -935,7 +927,6 @@ sub analyze_ppi_subtree {
 #------------------------------------------------------------------------------
 sub parse_module($) {
   my ($m) = @_;
-  # local (*m) = \ (@_);
 
 
   my $tree = PPI::Document->new($m->{filename}, readonly => 1, tab_width => 2);
@@ -1004,7 +995,6 @@ sub parse_module($) {
 #------------------------------------------------------------------------------
 sub resolve_symbol_and_module_dependency_graphs(++) {
   my ($all_exported_symbol_names, $all_modules) = @_;
-  # local (*all_exported_symbol_names, *all_modules) = \ (@_);
 
   $max_symbol_name_length = maxlength(@$all_exported_symbol_names);
   
@@ -1075,7 +1065,6 @@ sub resolve_symbol_and_module_dependency_graphs(++) {
 #------------------------------------------------------------------------------
 sub print_symbol_dependencies(+;$$) {
   my ($symbol_names, $fd, $fancy_format) = @_;
-  # local (*symbol_names, *fd, *fancy_format) = \ (@_);
 
   $fd //= STDERR;
   $fancy_format //= is_stderr_color_capable();
@@ -1106,7 +1095,6 @@ sub print_symbol_dependencies(+;$$) {
 #------------------------------------------------------------------------------
 sub print_module_dependencies(+;$$) {
   my ($module_refs, $fd, $fancy_format) = @_;
-  # local (*module_refs, *fd, *fancy_format) = \ (@_);
 
   $fd //= STDERR;
   $fancy_format //= is_stderr_color_capable();
@@ -1415,7 +1403,6 @@ sub generate_exports_decl($;$) {
 
 sub generate_module_bundle(+$) {
   my ($modules, $bundle_name) = @_;
-  # local (*modules, *bundle_name) = \ (@_);
 
   my $filename = '/dev/stdout';
 
@@ -1612,7 +1599,6 @@ sub generate_module_bundle(+$) {
 
 sub update_auto_imports(+) {
   my ($m) = @_;
-  # local (*m) = \ (@_);
 
 
   #$longest_import_mod_name = max($longest_import_mod_name, maxlength($m->{imported_module_names});
@@ -1661,7 +1647,6 @@ sub update_auto_imports(+) {
 #------------------------------------------------------------------------------
 sub generate_makefile_deps(+;$) {
   my ($modlist, $prefix) = @_;
-  # local (*modlist, *prefix) = \ (@_);
 
   my $out = '';
 
@@ -1690,7 +1675,6 @@ sub generate_makefile_deps(+;$) {
 #------------------------------------------------------------------------------
 sub write_updated_file($) {
   my ($m) = @_;
-  # local (*m) = \ (@_);
 
 
   my $changed_anything = ($m->{code} ne $m->{origcode});
@@ -1819,7 +1803,7 @@ sub process_command_line {
   if (defined $module_bundle_name) {
     $module_bundle_filename = ($module_bundle_name =~ s{::}{/}roaxg);
     if ($module_bundle_filename !~ /\.pm$/) { $module_bundle_filename .= '.pm'; }
-    $module_bundle_filename = realpath($module_bundle_filename) // $module_bundle_filename;
+    $module_bundle_filename = resolve_path($module_bundle_filename) // $module_bundle_filename;
   };
 
   foreach $arg (@_) {

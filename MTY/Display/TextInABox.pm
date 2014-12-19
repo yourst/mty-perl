@@ -555,11 +555,6 @@ sub print_folder_tab($;$$$$$$$$) {
 
   $outline_color //= (($is_rgb_capable) ? fg_color_rgb(128, 64, 192) : $B);
 
-  #my @tab_div_breaks = split(/$folder_tab_div_re/oax, $label);
-  #my @tab_div_widths = ( );
-  #my $tab_div_now = 0;
-  #foreach $div (@tab_div_breaks) { push @tab_div_widths, printed_length($div); }
-
   my $tab_div_str = $outline_color.long_narrow_vert_bar;
   $label =~ s{$folder_tab_div_re}{$tab_div_str}oax;
 
@@ -571,7 +566,7 @@ sub print_folder_tab($;$$$$$$$$) {
   $width //= (get_terminal_width_in_columns() - 1) - 
     (printed_length($prefix) + printed_length($suffix));
 
-  $dots_under_label_color = (($is_rgb_capable) ? fg_color_rgb(64, 32, 96) : $K);
+  $dots_under_label_color = (($is_rgb_capable) ? scale_rgb_fg($outline_color, 0.5) : $outline_color);
 
   $style_name //= 'rounded';
   my $tab_style_name = $style_name;
@@ -653,7 +648,6 @@ sub print_folder_tab($;$$$$$$$$) {
 
 sub text_in_a_box($;$$$$$$$$) {
   my ($input, $align, $color, $style_alias, $divstyle_name, $left_space, $width, $right_space, $skip_sides_bitmap) = @_;
-  # local (*input, *align, *color, *style_alias, *divstyle_name, *left_space, *width, *right_space, *skip_sides_bitmap) = \ (@_);
 
   my $lines = (is_array_ref($input)) ? [ @$input ] : [ split($split_nl_re, $input) ];
 

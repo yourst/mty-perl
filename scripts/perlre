@@ -12,6 +12,7 @@ use MTY::System::POSIX;
 use MTY::Common::Common;
 use MTY::Common::Hashes;
 use MTY::Common::Strings;
+use MTY::Filesystem::StatsCache;
 use MTY::Filesystem::Files;
 use MTY::Filesystem::FileStats;
 
@@ -83,6 +84,13 @@ $format_specified = 0;
 $split_key_prefix = "";
 $split_key_suffix = "";
 $file_line_marker_re = undef;
+
+my $default_file_line_marker_re = 
+  qr{^ [\#\%] 
+     (?|
+       (?: line \s+ (?<line> \d+) (?: \s+ (?<file> \S+))?) |
+       (?: file \s+ (?<file> \N+))
+     )}oax;
 
 $matching_line_count_limit = 1<<31;
 $invalid_args = 0;
@@ -270,10 +278,7 @@ foreach $arg (@ARGV) {
     $backup_dir = (is_there($1) ? $1 : './.subst.backups');
   } elsif ($arg =~ /^-file-line-marker(?:=(.+))?$/) {
     $is_show_filenames = 1;
-    $file_line_marker_re = (is_there($1) ? qr{$1}oa : 
-      qr{^ [\#\%] (?|
-           (?: line \s+ (?<line> \d+) (?: \s+ (?<file> \S+))?) |
-           (?: file \s+ (?<file> \N+)))}oax);
+    $file_line_marker_re = (is_there($1)) ? qr{$1}oa : $default_file_line_marker_re;
   } elsif ($arg eq '-stdout') {
     $is_subst_to_stdout = 1;
   } elsif ($arg =~ /^-(?:test | dry\-?run |no\-?out)$/oax) {
@@ -741,23 +746,23 @@ if ($DEBUG) {
   my $status = '%{tab}'.G.U.'perlre Debug Status'.X.NL;
   
   $status .=
-    boolean_status_to_string("eval", $is_eval).$K.', '.$X.
-    boolean_status_to_string("subst", $is_subst).$K.', '.$X.
-    boolean_status_to_string("anycase", $is_anycase).$K.', '.$X.
-    boolean_status_to_string("invert", $is_invert).$K.', '.$X.
+    boolean_status_to_string("eval", $is_eval).K.', '.X.
+    boolean_status_to_string("subst", $is_subst).K.', '.X.
+    boolean_status_to_string("anycase", $is_anycase).K.', '.X.
+    boolean_status_to_string("invert", $is_invert).K.', '.X.
     boolean_status_to_string("multiline", $is_multiline).NL.
-    boolean_status_to_string("string", $is_string).$K.', '.$X.
-    boolean_status_to_string("filelist", $is_filelist).$K.', '.$X.
-    boolean_status_to_string("stdio", $is_stdio).$K.', '.$X.
+    boolean_status_to_string("string", $is_string).K.', '.X.
+    boolean_status_to_string("filelist", $is_filelist).K.', '.X.
+    boolean_status_to_string("stdio", $is_stdio).K.', '.X.
     ($is_subst ? (boolean_status_to_string("subst_to_stdout", $is_subst_to_stdout).NL) : '').
-    boolean_status_to_string("test", $is_dry_run).$K.', '.$X.
-    boolean_status_to_string("colorize", $is_colorize).$K.', '.$X.
-    boolean_status_to_string("show_filenames", $is_show_filenames).$K.', '.$X.
+    boolean_status_to_string("test", $is_dry_run).K.', '.X.
+    boolean_status_to_string("colorize", $is_colorize).K.', '.X.
+    boolean_status_to_string("show_filenames", $is_show_filenames).K.', '.X.
     boolean_status_to_string("show_filenames_at_top", $is_show_filenames_at_top).NL.
-    ($is_split ? (boolean_status_to_string("key_lowercase", $is_key_lowercase).$K.', '.$X) : '').
+    ($is_split ? (boolean_status_to_string("key_lowercase", $is_key_lowercase).K.', '.X) : '').
     ($is_split ? (boolean_status_to_string("key_uppercase", $is_key_uppercase).NL) : '').
     boolean_status_to_string("show_colorized_compiled_regexps", $show_colorized_compiled_regexps).NL.
-    Y.'matching_line_count_limit '.$X.$matching_line_count_limit.NL.
+    Y.'matching_line_count_limit '.X.$matching_line_count_limit.NL.
     boolean_status_to_string('format_uses_special_vars', $format_uses_special_vars).NL.NL;
   $status .=
     Y.'original RE'.K.' = '.NL.show_compiled_regexp('original', $orig_regexp);
@@ -812,7 +817,7 @@ sub process_file {
   local $/ = $/;
   # These identifiers may be used by the format:
   my $sourcename = $filename;
-  my $sourcename_nodir = basename($filename);
+  my $sourcename_nodir = filename_of($filename);
   my $sourceid = $fileid;
 
   my $already_printed_filename = 0;
@@ -827,7 +832,7 @@ sub process_file {
     return -1;
   }
   
-  my @infile_stats = stat($IN);
+  my @infile_stats = get_file_stats_of_fd($IN);
   my $orig_file_permissions = $infile_stats[STAT_MODE];
 
   my $is_stdout = ($outfile eq '/dev/stdout');
@@ -881,7 +886,7 @@ sub process_file {
         ($ok ? $c : $k).padstring($filename, $max_filename_length).
         ' '.($ok ? $g.arrow_tri : $r.arrow_open_tri).' '.($ok ? ($g.padstring($matches, -4).$y.
         ' replacements') : ($r.(' ' x 4).' no matches')).$x.NL;
-      print(STDERR $s);
+      if ($ok) { print(STDERR $s); }
     }
   } else { # not $is_subst (i.e. regular matching without substitution)
   L: while (<$IN>) {
@@ -1003,7 +1008,7 @@ if ($is_stdio) {
     if ($is_subst) {
       if (defined $subst_output_dir_prefix) {
         $outfile = $subst_output_dir_prefix . '/' . $filename;
-        $dirname = dirname($outfile);
+        $dirname = directory_of($outfile);
         make_path($dirname);
       } elsif ($is_subst_to_stdout) {
         $outfile = '/dev/stdout';

@@ -7,9 +7,6 @@
 # Copyright 2014 Matt T. Yourst <yourst@yourst.com>
 #
 
-use Cwd 'realpath';
-use File::Basename 'dirname';
-
 use MTY::Common::Common;
 use MTY::Common::Hashes;
 use MTY::Common::Strings;

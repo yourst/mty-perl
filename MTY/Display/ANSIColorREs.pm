@@ -98,7 +98,6 @@ our $ansi_rgb_or_indexed_color_re = compile_regexp(
 
 sub strip_ansi_console_escape_codes($) {
   my ($s) = @_;
-  # local (*s) = \ (@_);
 
   $s =~ s/$ansi_console_escape_codes_re//oamsxg;
   return $s;

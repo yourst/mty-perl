@@ -7,10 +7,6 @@
 # Copyright 2014 Matt T. Yourst <yourst@yourst.com>
 #
 
-use Cwd 'realpath';
-use File::Basename 'dirname';
-
-use lib dirname(realpath($0));
 use MTY::Common::Common;
 use MTY::Common::Strings;
 use MTY::Filesystem::Files;

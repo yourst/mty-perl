@@ -12,26 +12,28 @@
 
 use integer; use warnings; 
 
+use MTY::System::POSIX;
 use MTY::Common::Common;
 use MTY::Common::Hashes;
 use MTY::Common::Strings;
-use MTY::Filesystem::Files;
-use MTY::Filesystem::FileStats;
-use MTY::Filesystem::EnhancedFileStats;
 use MTY::Common::CommandLine;
 
-use MTY::System::POSIX;
+use MTY::Filesystem::Files;
+use MTY::Filesystem::PathCache;
+use MTY::Filesystem::StatsCache;
+use MTY::Filesystem::FileStats;
+use MTY::Filesystem::EnhancedFileStats;
 use MTY::Filesystem::ProcFS;
 use MTY::Filesystem::OpenFiles;
 use MTY::Filesystem::ExtAttrs;
 use MTY::Filesystem::Mounts;
-use MTY::System::Misc;
 
 use MTY::Display::Colorize;
 use MTY::Display::ColorizeErrorsAndWarnings;
 use MTY::Display::ANSIColorREs;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;
+use MTY::Display::Table;
 
 use MTY::RegExp::Define;
 use MTY::RegExp::Tools;
@@ -40,6 +42,8 @@ use MTY::RegExp::Strings;
 use MTY::RegExp::Blocks;
 use MTY::RegExp::FilesAndPaths;
 use MTY::RegExp::Networks;
+
+use MTY::System::Misc;
 
 use Time::Piece;
 
@@ -50,6 +54,8 @@ my $sort_field = STAT_TYPE;
 my $sort_reverse = 0;
 my $long_format = 1;
 my $show_all = 1;
+my $follow_symlinks_on_command_line = 0;
+my $follow_symlinks_to_dirs_on_command_line = 0;
 my $print_column_headers = 0;
 my $combine_common_uid_gid = 1;
 my $max_file_size_decimal_digits = 7;
@@ -68,10 +74,15 @@ my $show_xattrs = 1;
 my $show_extents = 0;
 my $print_timestamps_with_am_pm = 0;
 my $print_today_for_mtime_in_past_24_hours = 0;
+my $shaded_color_coeff = 0.65;
+
 my $debug_layout = 0;
 
 my $DEBUG = 0;
 
+#
+# Colors, symbols and formatting:
+#
 my $vert_sep_bar_color = fg_color_rgb(96, 96, 96);
 
 my $light_bgcolor = bg_color_rgb(20, 10,  24);
@@ -89,22 +100,37 @@ my $perm_field_color = fg_color_rgb(48, 48, 48);
 use constant { darkK => fg_gray(96) };
 my $darkK = darkK;
 
-my @file_type_symbols = ('. ', 'p ', 'c ', '?3', 'd ', '?5', 'b ', '?7', '- ', '?9', 'l ', '?B', 's ', '?D', '?E', '?F');
+my $filename_color = fg_color_rgb(204, 204, 204);
+my $directory_color = fg_color_rgb(64, 192, 240);
+my $block_dev_color = fg_color_rgb(255, 224, 140);
+my $char_dev_color  = fg_color_rgb(255, 140, 224);
+my $pipe_color      = fg_color_rgb(128, 116, 255);
+my $socket_color    = fg_color_rgb(128, 240, 240);
+my $symlink_sym_color   = fg_color_rgb(192, 96, 255);
+
+my $filename_suffix_color = fg_color_rgb(255, 224, 0);
+my $filename_dots_color = scale_rgb_fg($filename_suffix_color, 0.75);
+
+my $executable_filename_color = fg_color_rgb(96, 255, 128);
+my $script_filename_color = fg_color_rgb(128, 255, 96);
+my $backup_filename_color = fg_color_rgb(112, 112, 112);
+my $privileged_executable_filename_color = fg_color_rgb(255, 128, 0);
+my $dot_filename_color = fg_color_rgb(216, 128, 160);
 
 my @file_type_colors = (
   $K, # (invalid)
-  fg_color_rgb(128, 116, 255), # (pipe)
-  fg_color_rgb(255, 140, 224),  # (char dev)
+  $pipe_color, # (pipe)
+  $char_dev_color,  # (char dev)
   $K,   
-  fg_color_rgb(64, 192, 240), # directory  
+  $directory_color, # directory  
   $K,
-  fg_color_rgb(255, 224, 140), # (block dev)
+  $block_dev_color, # (block dev)
   $K,
-  fg_color_rgb(204, 204, 204), # (file)
+  $filename_color, # (file)
   $K,
-  fg_color_rgb(192, 96, 255), # (symlink)
+  $symlink_sym_color, # (symlink)
   $K,
-  fg_color_rgb(128, 240, 240), # (socket)
+  $socket_color, # (socket)
   $K,
   $K,
   $K,
@@ -134,7 +160,7 @@ my @file_type_textual_symbols = (
   'p', # (pipe)
   'c', # (char dev)
   '?',   
-  'D', # directory  
+  chr(0x216e), # directory
   '?',  
   'b', # (block dev)
   '?',
@@ -147,9 +173,6 @@ my @file_type_textual_symbols = (
   '?', 
   '?'
 );
-
-# # These are indexed by $stat->[STAT_MODE] - 256:
-my @mount_type_symbols = ('Mp', 'Mb', 'Mm', 'Ms', 'Ma', 'Mn', 'Mf');
 
 my @mount_type_colors = (
   fg_color_rgb(255, 165, 63),    # (block dev)
@@ -184,15 +207,13 @@ my @mount_type_textual_symbols = (
 # These are indexed by $stat->[STAT_MODE] - 512:
 my @subvol_type_symbols = ('V ', 'SS');
 
-my @subvol_type_colors = ($R, $R);
-
-my @subvol_type_enhanced_symbols = (
-  four_diamonds.box_with_shadow,
-  four_diamonds.checkmark_in_box,
+my @subvol_type_colors = (
+  fg_color_rgb(216, 0, 255), # subvolume
+  fg_color_rgb(192, 64, 236), # snapshot
 );
 
 my @subvol_type_textual_symbols = (
-  'V ',
+  roman_numeral_v,
   'SS' 
 );
 
@@ -215,7 +236,7 @@ sub format_file_type_symbols($) {
   return 
     ' '.(($type < FILE_TYPE_MOUNT_POINT) ? $c.padstring($file_type_textual_symbols[$type], 2) :
     ($type < FILE_TYPE_SUBVOLUME) ? $C.square_root_symbol.$c.$mount_type_textual_symbols[$type - FILE_TYPE_MOUNT_POINT] :
-    $c.$subvol_type_textual_symbols[$type - FILE_TYPE_SUBVOLUME]).($is_accessible ? ' ' : Y.warning_sign);
+    $c.$subvol_type_textual_symbols[$type - FILE_TYPE_SUBVOLUME]).($is_accessible ? ' ' : Y.'!');
 }
 
 my $setxid_color = U.fg_color_rgb(255, 128, 0);
@@ -247,7 +268,6 @@ use constant setxid_color => fg_color_rgb(255, 128, 0); # orange
 use constant { 
   ORANGE => fg_color_rgb(255, 128, 0), 
   rgbfgORANGE_dark_1_3 => fg_color_rgb(85, 43, 0), 
-  # R_1_3 => fg_color_rgb(scale_rgb(rgbfgR, 0.333))
 };
 
 my @perm_field_id_to_setxid_color = (
@@ -276,7 +296,6 @@ use constant {
 
 sub format_permission_field($$;$$$$$) {
   my ($rwx, $allperms, $underlined_mask, $filetype, $is_accessible, $ugo_acl_or_other, $capabilities_xattr) = @_;
-  # local (*rwx, *allperms, *filetype, *ugo_acl_or_other) = \ (@_);
 
   $filetype //= FILE_TYPE_FILE;
   $ugo_acl_or_other //= PERM_FIELD_S;
@@ -327,13 +346,13 @@ sub format_permission_field($$;$$$$$) {
 }
 
 my $different_uid_gid_color = fg_color_rgb(255, 224, 128);
-my $same_uid_gid_color = fg_color_rgb(scale_rgb($different_uid_gid_color, 0.5));
+my $same_uid_gid_color = scale_rgb_fg($different_uid_gid_color, $shaded_color_coeff);
 my $unknown_uid_gid_color = fg_color_rgb(255, 64, 128);
 
 my $xattr_symbol = fg_color_rgb(255, 80, 180).chr(0x212f).chr(0x03b1); # stylized "ea" 
 
 my $symlink_type_color = fg_color_rgb(224, 128, 192);
-my $symlink_type_shaded_color = fg_color_rgb(scale_rgb($symlink_type_color, 0.667));
+my $symlink_type_shaded_color = scale_rgb_fg($symlink_type_color, 0.667);
 
 sub format_stat_mode_permissions($;$$$$$) {
   my ($stats, $show_user, $show_group, $all_files_in_dir) = @_;
@@ -523,11 +542,11 @@ sub log1024($) {
 use integer;
 
 my $file_size_color = fg_color_rgb(192, 96, 255);
-my $file_size_sep_color = fg_color_rgb(scale_rgb($file_size_color, 0.75));
+my $file_size_sep_color = scale_rgb_fg($file_size_color, 0.75);
 my $file_size_units_color = fg_color_rgb(236, 0, 180);
 
 my $small_file_size_color = fg_color_rgb(64, 160, 224);
-my $small_file_size_sep_color = fg_color_rgb(scale_rgb($small_file_size_color, 0.75));
+my $small_file_size_sep_color = scale_rgb_fg($small_file_size_color, 0.75);
 
 my $small_file_size_comma_sep;
 my $file_size_comma_sep;
@@ -557,7 +576,7 @@ sub format_file_size($) {
 }
 
 use constant { timestamp_base_color => fg_color_rgb(0, 255, 192), };
-use constant { timestamp_dark_color => fg_color_rgb(scale_rgb(timestamp_base_color, 0.30)), };
+use constant { timestamp_shaded_color => scale_rgb_fg(timestamp_base_color, 0.30), };
 
 my $current_timestamp = undef;
 
@@ -569,24 +588,24 @@ use constant SECONDS_PER_MONTH => 30*SECONDS_PER_DAY;
 use constant SECONDS_PER_YEAR => 365*SECONDS_PER_DAY;
 
 my @oldness_category_params = (
-  [ 1,                  'sec', fg_color_rgb(scale_rgb(timestamp_base_color, 1.00)), ],
-  [ SECONDS_PER_MINUTE, 'min', fg_color_rgb(scale_rgb(timestamp_base_color, 0.90)), ],
-  [ SECONDS_PER_HOUR,   'hrs', fg_color_rgb(scale_rgb(timestamp_base_color, 0.75)), ],
-  [ SECONDS_PER_DAY,    'Day', fg_color_rgb(scale_rgb(timestamp_base_color, 0.60)), ],
-  [ SECONDS_PER_MONTH,  'Mon', fg_color_rgb(scale_rgb(timestamp_base_color, 0.45)), ],
-  [ SECONDS_PER_YEAR,   'Yrs', fg_color_rgb(scale_rgb(timestamp_base_color, 0.30)), ]
+  [ 1,                  'sec', scale_rgb_fg(timestamp_base_color, 1.00), ],
+  [ SECONDS_PER_MINUTE, 'min', scale_rgb_fg(timestamp_base_color, 0.90), ],
+  [ SECONDS_PER_HOUR,   'hrs', scale_rgb_fg(timestamp_base_color, 0.75), ],
+  [ SECONDS_PER_DAY,    'Day', scale_rgb_fg(timestamp_base_color, 0.60), ],
+  [ SECONDS_PER_MONTH,  'Mon', scale_rgb_fg(timestamp_base_color, 0.45), ],
+  [ SECONDS_PER_YEAR,   'Yrs', scale_rgb_fg(timestamp_base_color, 0.30), ]
 );
 
 my $current_local_time = localtime();
 
-sub format_timestamp($;$$$) {
-  my ($timestamp, $nanoseconds, $show_nanosec_precision, $newest_file_timestamp_in_listing) = @_;
-  $newest_file_timestamp_in_listing //= $nanoseconds;
-
+sub format_file_timestamp($;$$) {
+  my ($stats, $show_nanosec_precision, $newest_file_timestamp_in_listing) = @_;
   $show_nanosec_precision //= 0;
+  my $timestamp = $stats->[STAT_MTIME];
+  my $nanoseconds = $stats->[STAT_MTIME_NS];
 
-  if (!defined $current_timestamp) 
-    { $current_timestamp = clock_gettime_nsec(); }
+  $current_timestamp //= clock_gettime_nsec();
+  $newest_file_timestamp_in_listing //= $nanoseconds;
 
   my $nsec_in_past = $current_timestamp - $nanoseconds;
   my $sec_in_past = $nsec_in_past / BILLION;
@@ -607,9 +626,7 @@ sub format_timestamp($;$$$) {
     ($sec_in_past < SECONDS_PER_YEAR)   ? 4 : 5;
  
   my ($seconds_divisor, $abbrev, $color) = @{$oldness_category_params[$oldness_category]};
-  my $darkcolor = timestamp_dark_color;
-
-  #print(STDERR "$sec_in_past secs in past: oldness_category = $oldness_category, abbrev $abbrev, divisor $seconds_divisor\n");
+  my $darkcolor = timestamp_shaded_color;
 
   #
   # For most printing purposes, only use the whole seconds resolution of 
@@ -645,7 +662,7 @@ sub format_timestamp($;$$$) {
     $color.$year.$darkcolor.'-'.$color.sprintf('%02d', $month).$darkcolor.'-'.$color.sprintf('%02d', $day);
 
   my $timestr = 
-    $color.sprintf('%2d', $hour).$darkcolor.':'.
+    $color.sprintf('%02d', $hour).$darkcolor.':'.
     $color.sprintf('%02d', $min).$darkcolor.':'.
     $color.sprintf('%02d', $sec).$darkcolor.$ampm.'.'.
     $color.sprintf('%03d', $frac_millisecs).$darkcolor;
@@ -656,17 +673,8 @@ sub format_timestamp($;$$$) {
   return $datestr.' '.$timestr.' '.$deltastr;
 }
 
-sub format_file_timestamp($;$$) {
-  my ($stats, $show_nanosec_precision, $newest_file_timestamp_in_listing) = @_;
-
-  return format_timestamp($stats->[STAT_MTIME], 
-                          $stats->[STAT_MTIME_NS], 
-                          $show_nanosec_precision // 0);
-}
-
 sub init_file_type_to_sorting_rank($) {
   my ($r) = @_;
-  # local (*r) = \ (@_);
 
   # Mounted filesystem root directories always appear first,
   # with higher priority given to "real" filesystems (vs pseudo
@@ -706,28 +714,17 @@ INIT {
   init_file_type_to_sorting_rank(\@file_type_to_sorting_rank);
 };
 
-my $filename_suffix_color = fg_color_rgb(255, 224, 0); #fg_color_rgb(64, 160, 224);
-my $filename_dots_color = fg_color_rgb(204, 180, 0);
-my $filename_color = fg_color_rgb(204, 204, 204);
-
-my $backup_filename_color = fg_color_rgb(112, 112, 112);
-
-my $executable_filename_color = fg_color_rgb(96, 255, 128);
-my $executable_filename_dark_color = fg_color_rgb(48, 128, 64);
-my $privileged_executable_filename_color = fg_color_rgb(255, 128, 0);
-
-my $dot_filename_color = fg_color_rgb(216, 128, 160);
+my $directory_shaded_color = scale_rgb_fg($directory_color, $shaded_color_coeff);
+my $executable_filename_shaded_color = scale_rgb_fg($executable_filename_color, $shaded_color_coeff);
+my $script_filename_shaded_color = scale_rgb_fg($executable_filename_color, $shaded_color_coeff);
 
 my $symlink_color = fg_color_rgb(255, 128, 192);
-my $symlink_shaded_color = fg_color_rgb(scale_rgb($symlink_color, 0.5));
 my $symlink_target_color = fg_color_rgb(192, 160, 255);
+my $symlink_missing_target_color = fg_color_rgb(255, 192, 128);
+my $symlink_shaded_color = scale_rgb_fg($symlink_color, $shaded_color_coeff);
+
+my $symlink_target_sep_color = scale_rgb_fg($symlink_target_color, $shaded_color_coeff);
 my $symlink_symbol = ' '.fg_color_rgb(0, 255, 128).dashed_horiz_bar_2_dashes.arrow_barbed.' ';
-
-my $directory_shaded_color = fg_color_rgb(64, 92, 104);
-
-my $devid_color = fg_color_rgb(120, 64, 114);
-my $devid_inode_sep_color = fg_color_rgb(104, 72, 104);
-my $inode_color = fg_color_rgb(180, 96, 170);
 
 my $directory_separator_symbol = $directory_shaded_color.large_right_slash;
 
@@ -756,14 +753,22 @@ sub query_interpreter($) {
   return $interp;
 }
 
-sub format_filename($$) {
-  my ($path, $stats) = @_;
+sub format_directory_path($;$$) {
+  my ($path, $color, $sep_color) = @_;
+  $color //= $directory_color;
+  $sep_color //= scale_rgb_fg($color, $shaded_color_coeff);
+  my $replacement = $sep_color.large_right_slash.$color;
+  return $color.(normalize_trailing_slash($path) =~ s{/}{$replacement}roamsxg);
+}
 
+sub format_filename($$$) {
+  my ($path, $stats, $dirfd) = @_;
   my ($dirname, $basename, $suffixes) = split_path_version_aware($path);
   my $filename = filename_of($path);
 
   my ($type, $perms, $size, $symlink) = @{$stats}[STAT_TYPE, STAT_MODE, STAT_SIZE, STAT_SYMLINK];
   my $is_dot_or_dot_dot = ($filename =~ /\A\..?\Z/oax) ? 1 : 0;
+  my $type_color = get_file_type_color($type);
 
   my $xattrs = $stats->[STAT_XATTRS];
   my $capabilities_xattr = $stats->[STAT_CAPABILITIES];
@@ -781,37 +786,50 @@ sub format_filename($$) {
   my $append = '';
   my $suffix_color = undef;
   if ($type == FILE_TYPE_FILE) {
+    my $interp = ($is_executable) ? query_interpreter($stats->[STAT_PATH]) : undef;
     $color = ($is_executable 
-       ? ($is_privileged ? $privileged_executable_filename_color : $executable_filename_color)
-       : (($filename =~ /^\./) ? $dot_filename_color : $filename_color));
+       ? ($is_privileged ? $privileged_executable_filename_color : 
+          (defined $interp) ? $script_filename_color :
+          $executable_filename_color)
+       : (($filename =~ /^\./) ? $dot_filename_color : $type_color));
     $suffix_color = $filename_suffix_color;
-    if ($is_executable) { 
-      my $interp = query_interpreter($path);
-      if (defined $interp) {
-        $interp = filename_of($interp);
-        my $c = ($interp =~ /perl/) ? M : ($interp =~ /sh/) ? Y : R;
-        my $cs = scale_rgb_fg($c, RATIO_2_3);
-        $append .= $cs.' (#! '.$c.$interp.$cs.')'; 
-      }
+    if (defined $interp) {
+      $interp = filename_of($interp);
+      my $c = ($interp =~ /perl/) ? M : ($interp =~ /sh/) ? Y : R;
+      my $cs = scale_rgb_fg($c, RATIO_2_3);
+      $append .= $cs.' (#! '.$c.$interp.$cs.')'; 
     }
   } elsif ($type == FILE_TYPE_SYMLINK) {
     $color = $symlink_color;
-    $symlink //= fg_color_rgb(255, 96, 0).' '.x_symbol.' cannot read symlink ';
+    my $printed_symlink;
 
-    if (ends_with($symlink, '/'.$filename)) { 
-      my $r = $color.elipsis_three_dots;
-      $symlink =~ s{/ \K $filename $}{$r}x;
+    if (defined $symlink) {
+      my $target_filename = filename_of($symlink);
+      my $target_abs_path = resolve_path($symlink, $dirfd, 0);
+      my $target_exists = (defined $target_abs_path) ? 1 : 0;
+      my $target_dir = ($target_exists) ? strip_last_path_component($target_abs_path) : undef;
+      my $same_dir = ($target_exists && ($target_dir eq (path_of_open_fd($dirfd) // '')));
+      my $same_filename = ($target_filename eq $filename) ? 1 : 0;
+
+      $printed_symlink = ($target_exists)
+        ? (($same_dir) 
+            ? $symlink_target_sep_color.dot.large_right_slash 
+            : format_directory_path($target_dir, $symlink_target_color, $symlink_target_sep_color)).
+          ($same_filename ? $color.elipsis_three_dots : $symlink_target_color.$target_filename)
+        : $symlink_missing_target_color.$symlink;
+    } else {
+      $printed_symlink = fg_color_rgb(255, 96, 0).' '.x_symbol.' cannot read symlink ';
     }
 
-    $append = $symlink_symbol.$symlink_target_color.$symlink;
+    $append = $symlink_symbol.$printed_symlink;
   } elsif ($type == FILE_TYPE_DIR || $type >= FILE_TYPE_MOUNT_POINT) {
     $dirname = strip_trailing_slash($dirname);
-    $color = $U.get_file_type_color($type);
+    $color = $U.$type_color;
     $prepend = $directory_shaded_color;
-    $append = $UX.$directory_separator_symbol;
+    $append = $UX; #.$directory_separator_symbol;
 
     if (($type >= FILE_TYPE_MOUNT_POINT) && ($type < FILE_TYPE_SUBVOLUME)) {
-      my $mountinfo = query_mount_point($path);
+      my $mountinfo = query_mount_point($stats->[STAT_PATH]);
       if (defined $mountinfo) { 
         $append .= darkK.' ['.$mount_info_fs_color.$mountinfo->[MOUNTINFO_TYPE].
           darkK.' @ '.$mount_info_dev_color.$mountinfo->[MOUNTINFO_SOURCE].darkK.']';
@@ -831,12 +849,10 @@ sub format_filename($$) {
 
   $suffix_color //= $color;
 
-  my $dir_color = (($unique_dir_count > 1) && (!$is_dot_or_dot_dot)) 
-    ? $directory_shaded_color : get_file_type_color(FILE_TYPE_DIR);
+  my $dir_color = ($is_dot_or_dot_dot) ? $type_color :
+    (($unique_dir_count > 1) ? $directory_shaded_color : $type_color);
 
   # Only show the full directory path if the filename is '.', '..' or we're listing multiple directories:
-  # $dirname = strip_trailing_slash($dirname);
-  if ($filename eq '..') { $dirname =~ s{/?[^/]+\Z}{}oamsx; }
 
   $filename = 
     ($filename eq '.') ? dot : 
@@ -844,15 +860,13 @@ sub format_filename($$) {
     $filename;
 
   $dirname = 
-    ($is_dot_or_dot_dot) ? $dir_color.$filename.$directory_shaded_color.' = '.$dir_color.$dirname :
-    ($unique_dir_count > 1) ? $directory_shaded_color.$dirname : '';
+    ($is_dot_or_dot_dot) ? ($dir_color.$filename.$directory_shaded_color.' = '.format_directory_path($stats->[STAT_PATH], $dir_color)) :
+      ($unique_dir_count > 1) ? format_directory_path($dirname, $directory_shaded_color, $directory_shaded_color) : '';
 
   if ($is_dot_or_dot_dot) {
     $basename = ''; 
     $suffixes = '';
   }
-
-  $dirname =~ s{/}{$directory_separator_symbol$dir_color}oaxg;
 
   if (defined $suffix_color) 
     { $suffixes =~ s{\.}{${filename_dots_color}.${suffix_color}}oaxg; }
@@ -918,6 +932,12 @@ sub format_openfds($+) {
 
 my $show_inodes = 0;
 
+my $devid_color = fg_color_rgb(140, 132, 180); #fg_color_rgb(120, 64, 114);
+my $devid_shaded_color = scale_rgb_fg($devid_color, 0.667);
+
+my $inode_color = fg_color_rgb(180, 96, 170);
+my $inode_shaded_color = scale_rgb_fg($inode_color, 0.667);
+
 sub format_inode_and_devid(+) {
   my ($stats) = @_;
   if (!($show_inodes)) { return ''; }
@@ -925,13 +945,14 @@ sub format_inode_and_devid(+) {
   my $inode = $stats->[STAT_INODE];
   my $devid = $stats->[STAT_DEV];
 
-  return $devid_color.$devid.
-    $devid_inode_sep_color.sharp_sign.
-    $inode_color.$inode.X;
+  return (
+    $devid_shaded_color.double_disc.' '.$devid_color.$devid,
+    $inode_shaded_color.sharp_sign.$inode_color.$inode
+  );
 }
 
 my $extents_color = fg_color_rgb(255, 64, 96);
-my $extents_dark_color = fg_color_rgb(scale_rgb($extents_color, 0.5));
+my $extents_shaded_color = scale_rgb_fg($extents_color, $shaded_color_coeff);
 
 sub format_extents(+) {
   my ($stats) = @_;
@@ -945,7 +966,7 @@ sub format_extents(+) {
     # directories and symlinks don't provide reliable info here, 
     # so use this column to show the number of files in directories
     my $dir = read_directory($stats->[STAT_PATH]);
-    return ((defined $dir) ? $extents_color.scalar(@$dir).' '.$extents_dark_color.'in dir'.X : '');
+    return ((defined $dir) ? $extents_color.scalar(@$dir).' '.$extents_shaded_color.'in dir'.X : '');
   } elsif ($type == FILE_TYPE_FILE) {
     my ($total_extents, $total_bytes, $shared_bytes, $inlined_bytes, $tail_bytes, $unwritten_bytes) = 
       @{$extents}{total_extents, total_bytes, shared_bytes, inlined_bytes, tail_bytes, unwritten_bytes};
@@ -958,13 +979,13 @@ sub format_extents(+) {
     
     my $out = '';
     
-    $out .= ($total_extents > 1) ? $extents_color.padstring($total_extents, -4).$extents_dark_color.division_symbol.' ' : (' ' x 6);
+    $out .= ($total_extents > 1) ? $extents_color.padstring($total_extents, -4).$extents_shaded_color.division_symbol.' ' : (' ' x 6);
     
     if ($inlined_or_tail) {
       $out .= $extents_color.(($inlined_bytes > 0) ? 'inline' : (' ' x 6)).(($tail_bytes > 0) ? 'tail  ' : (' ' x 6));
     } else {
-      $out .= ($unwritten_bytes > 0) ? $extents_color.padstring($unwritten_percent, -3).$extents_dark_color.' %U' : (' ' x 6);
-      $out .= ($shared_percent > 0) ? $extents_color.padstring($shared_percent, -3).$extents_dark_color.' %C' : (' ' x 6);
+      $out .= ($unwritten_bytes > 0) ? $extents_color.padstring($unwritten_percent, -3).$extents_shaded_color.' %U' : (' ' x 6);
+      $out .= ($shared_percent > 0) ? $extents_color.padstring($shared_percent, -3).$extents_shaded_color.' %C' : (' ' x 6);
     }
 
     return $out;
@@ -1023,6 +1044,7 @@ my %command_line_options = (
   'digits' => [ \$max_file_size_decimal_digits, OPTION_VALUE_REQUIRED, [ 'size-digits', 'file-size-digits' ] ],
   'comma' => [ \$comma_separated_digits, OPTION_ASSIGN_BOOL, [ 'comma-sep-sizes' ] ],
   'd' => [ \$show_directory_itself, OPTION_SINGLE_CHAR_COMBINABLE, [ 'directory-itself', 'dir-itself', ] ],
+  'H' => [ \$follow_symlinks_on_command_line, OPTION_SINGLE_CHAR_COMBINABLE, [ 'follow-cmdline', 'follow-args', ] ],
   'D' => [ \$only_show_directories, OPTION_SINGLE_CHAR_COMBINABLE, [ 'only-dirs', 'only-show-dirs', 'only-directories' ] ],
   'F' => [ \$only_show_files, OPTION_SINGLE_CHAR_COMBINABLE, [ 'only-files', 'only-show-files' ] ],
   'K' => [ \$only_show_symlinks, OPTION_SINGLE_CHAR_COMBINABLE, [ 'only-links', 'only-show-links', 'only-symlinks', 'only-show-symlinks' ] ],
@@ -1037,6 +1059,7 @@ my %command_line_options = (
 # 'search' => [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED|OPTION_COMMA_SEP_LISTS|OPTION_APPEND_REPEATS, [ 'grep', 'find' ] ],
   'and' => [ \&match_all_patterns, 0 ],
   'or' => [ \&match_any_patterns, 0 ],
+  'shaded-color-coeff' => [ \$shaded_color_coeff, OPTION_VALUE_REQUIRED, [ 'shading', 'shade', 'dark', 'darkness', 'contrast' ] ],
 );
 
 while (my ($field, $index) = each %stat_field_name_to_index_map) {
@@ -1133,7 +1156,13 @@ sub lls_main {
   my $groupsref;
   ($euid, $egid, $groupsref) = get_current_uid_gid_groups();
   @groups = @{$groupsref};
-
+  
+  #
+  # Check LS_OPTIONS environment variable and add any supported options
+  # to the start of the effective command line, although actual command
+  # line options may override any options set in LS_OPTIONS:
+  #
+  
   my ($pathargs, $invalid_option_indexes) = 
     parse_and_check_command_line(%command_line_options);
 
@@ -1151,29 +1180,84 @@ sub lls_main {
   # 
 
   my %dir_to_filename_list = ( );
-
+  my %dir_to_dir_path_fd = ( );
+  
   # *+MTY TODO: use readdirplus (IO::Dirent) perl mod to get file types
   # note that $filename may actually be a directory if it is the final
   # component in the specified path:
   # use IO::Dirent;
 
   foreach my $path (@$pathargs) {
-    my ($dirname, $filename) = split_dir_and_filename($path);
+    my ($orig_dirname, $filename) = split_dir_and_filename($path);
 
+    my $dirname = resolve_path($orig_dirname);
+
+    if (!defined $dirname) {
+      simple_warning('Directory '.format_quoted($orig_dirname). ' does not exist');
+      next;
+    }
+
+    my $dirfd = $dir_to_dir_path_fd{$dirname};
+
+    if (!exists $dir_to_dir_path_fd{$dirname}) {
+      $dirfd = sys_open_path($dirname);
+
+      if (!defined $dirfd) {
+        simple_warning('Cannot access directory '.format_quoted($dirname));
+        next;
+      }
+
+      $dir_to_dir_path_fd{$dirname} = $dirfd;
+    }
+
+    #
     # The returned stats will be automatically cached
-    # so we won't need to re-read them redundantly:
-    my $stats = get_file_stats($path, undef, 0);
+    # so we won't need to re-read them redundantly
+    # in the common case where the shell does glob
+    # expansion of wildcards before we even see the
+    # original command line prior to expansion, and
+    # instead only get a lengthy list of filenames:
+    #
+    my $stats = get_file_stats($filename, $dirfd, $follow_symlinks_on_command_line);
 
     if (!defined $stats) {
       simple_warning('Cannot access '.format_quoted($path));
       next;
     }
 
-    my $is_dir = is_directory_from_stats($stats);
-    # if ($stats->[STAT_TYPE] == FILE_TYPE_SYMLINK) ...
+    if ($follow_symlinks_to_dirs_on_command_line && 
+      ($stats->[STAT_TYPE] == FILE_TYPE_SYMLINK)) {
+      my $target_stats = get_file_stats(sys_readlink($path));
+      if ((defined $target_stats) && ($target_stats->[STAT_TYPE] == FILE_TYPE_DIR)) {
+        $stats = $target_stats;
+        $path = $stats->[STAT_PATH];
+      }
+    }
 
-    if ($is_dir) {
-      $dir_to_filename_list{$path} //= read_directory($path);
+    if (is_directory_from_stats($stats)) {
+      $orig_dirname = $path;
+      $filename = undef;
+      my $dirname = resolve_path($orig_dirname);
+
+      if (!defined $dirname) {
+        simple_warning('Directory '.format_quoted($orig_dirname). ' does not exist');
+        next;
+      }
+
+      $dirfd = $dir_to_dir_path_fd{$dirname};
+
+      if (!exists $dir_to_dir_path_fd{$dirname}) {
+        $dirfd = sys_open_path($dirname);
+
+        if (!defined $dirfd) {
+          simple_warning('Cannot access directory '.format_quoted($dirname));
+          next;
+        }
+
+        $dir_to_dir_path_fd{$dirname} = $dirfd;
+      }
+
+      $dir_to_filename_list{$dirname} //= read_directory($path);
     } else {
       push @{$dir_to_filename_list{$dirname}}, $filename;
     }
@@ -1193,10 +1277,11 @@ sub lls_main {
 
   foreach my $dirname (sort keys %dir_to_filename_list) {
     my $filenames = $dir_to_filename_list{$dirname};
+    my $dirfd = $dir_to_dir_path_fd{$dirname};
     my $prefix = ($unique_dir_count > 1) ? normalize_trailing_slash($dirname) : '';
-
-    stat_files_in_directory($dirname, $filenames, 0, undef, undef, 
-                            $allstats, $prefix, $stats_to_query, $open_files);
+    stat_files_in_directory($dirname, $filenames, $stats_to_query, 
+                            $dirfd, undef, $open_files,
+                            $allstats, $prefix);
   }
 
   my $sort_comparator = 
@@ -1226,11 +1311,21 @@ sub lls_main {
   my $all_file_uids_match_common_uid = 1;
   my $all_file_gids_match_common_gid = 1;
 
-  if ((sizeof(@ordered_filenames) <= 3) || (!$combine_common_uid_gid)) {
+  my $real_filename_count = 0;
+
+  foreach my $path (@ordered_filenames) {
+    my $filename = filename_of($path);
+    $real_filename_count += ((($filename ne '.') && ($filename ne '..')) ? 1 : 0);
+  }
+
+  if (!$real_filename_count) { $show_dot_and_dot_dot = 1; }
+
+  if (($real_filename_count <= 1) || (!$combine_common_uid_gid)) {
     # If we only have one file to list (excluding . and ..), just print its uid/gid like ls:
     $all_file_uids_match_common_uid = 0;
     $all_file_gids_match_common_gid = 0;
   }
+
 
   my $every_file_has_only_one_hard_link = 1;
   my $newest_file_timestamp_in_listing = 0;
@@ -1265,9 +1360,9 @@ sub lls_main {
     # or subvolumes rather than just being simple directories, so don't
     # skip them if they are in fact these special directory types.
     my $skip = 
-      ((($filename eq '.' || $filename eq '..') && ($type == FILE_TYPE_DIR)) && (!$show_directory_itself) && (!$show_dot_and_dot_dot)) ||
+      (((($filename eq '.' || $filename eq '..') && ($type == FILE_TYPE_DIR)) && (!$show_directory_itself) && (!$show_dot_and_dot_dot)) ||
       ($show_directory_itself && ($filename ne '.')) ||
-      (!$allowed_file_types[$type]);
+      (!$allowed_file_types[$type])) ? 1 : 0;
 
     if ($skip) { $filename = undef; next; }
 
@@ -1290,8 +1385,13 @@ sub lls_main {
   my $common_messages = '';
   my $common_message_lines = 0;
 
+  if (!$real_filename_count) {
+    $common_messages = ORANGE.' '.x_symbol.'  '.Y.'No files found in specified directories '.NL;
+    $common_message_lines++;
+  }
+
   if ($all_file_uids_match_common_uid || $all_file_gids_match_common_gid) {
-    $common_messages = $C.' '.star.'  '.$B.'All '.$C.sizeof(@ordered_filenames).$B.' items are owned by ';
+    $common_messages .= $C.' '.star.'  '.$B.'All '.$C.sizeof(@ordered_filenames).$B.' items are owned by ';
     if ($all_file_uids_match_common_uid) {
       $common_messages .= 'user '.$G.
         (lookup_user_name_from_uid($common_uid) // $R.'<unknown>').$B.
@@ -1367,6 +1467,8 @@ sub lls_main {
     my $is_executable = ($perms & PERM_X_ANY_UGO) ? 1 : 0;
     my $is_accessible = ($stats->[STAT_IS_ACCESSIBLE]) ? 1 : 0;
     my $is_open = (defined $stats->[STAT_OPENFD] && (sizeof($stats->[STAT_OPENFD]) > 0));
+    my $dir = strip_last_path_component($stats->[STAT_PATH]);
+    my $dirfd = $dir_to_dir_path_fd{$dir};
 
     my $vert_sep_chars = 
       ($is_accessible ?
@@ -1378,7 +1480,7 @@ sub lls_main {
     my $vert_sep_color = 
       ($is_dir) ? $directory_shaded_color :
       ($type == FILE_TYPE_SYMLINK) ? $symlink_shaded_color :
-      ($is_executable) ? $executable_filename_dark_color :
+      ($is_executable) ? $executable_filename_shaded_color :
       $vert_sep_bar_color;
 
     my ($open_files_long, $open_files_short) = format_openfds($filename, $stats);
@@ -1389,7 +1491,7 @@ sub lls_main {
 
     my $columns = [ map {
       set_rgb_bg_in_string(($is_accessible) ? $_ : 
-        blend_and_scale_rgb_fg_in_string($_, [255, 0, 0], 0.3, 0.5), $bgcolor)
+        blend_and_scale_rgb_fg_in_string($_, [255, 0, 0], 0.7, 0.25), $bgcolor)
     } remove_undefs(
       format_file_type_symbols($stats),
 
@@ -1409,11 +1511,11 @@ sub lls_main {
       
       format_file_timestamp($stats, 1, $newest_file_timestamp_in_listing),
 
-      ($show_inodes) ? format_inode_and_devid($stats) : undef,
+      ($show_inodes) ? (format_inode_and_devid($stats)) : (undef, undef),
       
       X.$vert_sep_color.$vert_sep_chars.X,
 
-      format_filename($stats->[STAT_PATH], $stats).$open_files_long.X,
+      format_filename($filename, $stats, $dirfd).$open_files_long.X,
     ) ];
 
     push @rows, $columns;
@@ -1434,7 +1536,7 @@ sub lls_main {
     $aR, # size (or major/minor for block or char device nodes)
     ($show_extents ? $aR : undef), # extents, shared/cloned, sparse, etc. (optional)
     $aL, # timestamp
-    ($show_inodes ? $aR : undef), # inode and device (optional)
+    ($show_inodes ? ($aR, $aR) : (undef, undef)), # inode and device (optional)
     $aL, # secondary file type symbol
     $aL, # filename, symlink target, etc.
   ) ];
@@ -1449,7 +1551,7 @@ sub lls_main {
     ' ', # size (or major/minor for block or char device nodes)
     ($show_extents ? ' ' : undef), # extents, shared/cloned, sparse, etc. (optional)
     ' ', # timestamp
-    ($show_inodes ? ' ' : undef), # inode and device (optional)
+    ($show_inodes ? (' ', ' ') : (undef, undef)), # inode and device (optional)
     '', # secondary file type symbol
     '', # filename, symlink target, etc.
   ) ];
@@ -1463,7 +1565,7 @@ sub lls_main {
     #use DDP; p @rows;
   }
 
-  print_columns(STDOUT, @rows, $colseps, '', NL, $alignments);
+  print_table(STDOUT, @rows, colseps => $colseps, align => $alignments);
 
   if ($output_line_counter >= $terminal_lines) {
     # if ($print_column_headers) { print($column_headers); }

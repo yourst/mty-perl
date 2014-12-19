@@ -18,6 +18,7 @@ use MTY::Display::Colorize;
 use MTY::Display::ColorizeErrorsAndWarnings;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;
+use MTY::Display::Table;
 use MTY::Display::TextInABox;
 use MTY::Display::Scrollable;
 use MTY::RegExp::Define;
@@ -308,7 +309,7 @@ use constant {
 };
 
 our $command_line_option_re = compile_regexp(
-  qr{^ - -? (?: (no | disable | enable | not) -)?
+  qr{^ - -? 
       ([^\=\:]*) 
       (?: [\=\:] (.*))? 
       $}oax,
@@ -316,6 +317,9 @@ our $command_line_option_re = compile_regexp(
   'or "-X:<V>", where V is a value string, and the optional <modifier> may be '.
   '"no", "disable", "enable" or "not", which imply a V of 0, 0, 1 or the logical '.
   'negation of a user-defined default value, respectively.');
+
+my $modifier_and_option_name_re = 
+  qr{($boolean_words_re)-([^\=\:]+)}oax;
 
 our $key_value_option_re = 
   qr{\G ([^\=\:]++) 
@@ -369,24 +373,6 @@ sub INVALID_OPTION { return \$invalid_option_indicator; }
 my $no_var_for_option_indicator = '<novariable>';
 
 sub NO_VAR_FOR_OPTION { return \$no_var_for_option_indicator; }
-
-my %option_name_modifier_to_implied_value = (
-  'no' => 0,
-  'disable' => 0,
-  'disabled' => 0,
-  'without' => 0,
-  'skip' => 0,
-  'exclude' => 0,
-
-  'enable' => 1,
-  'enabled' => 1,
-  'yes' => 1,
-  'do' => 1,
-  'use' => 1,
-  'with' => 1,
-
-  'not' => -1
-);
 
 #
 # We add a reference to this string to the hash of options to indicate
@@ -566,14 +552,13 @@ sub preprocess_option_specs(+) {
     # single character options:
     #
     my @all_option_names = ((keys %$origspecs), (keys %$aliases));
-    # print('all_option_names = '.join(' ', sort keys %$aliases).NL);
+
     foreach my $name (sort keys %$aliases) {
       next if (length($name) <= 1);
       my @chars = split(//, $name);
       my $single_char_combinable_opts = 0;
-      # print($name.':'.NL);
+
       foreach my $c (@chars) {
-        # print('  ['.$c.'] => '.($single_char_option_hints->[ord($c)] // ' ').NL);
         my $hint = $single_char_option_hints->[ord($c)] // 0;
         $single_char_combinable_opts += ($hint & SINGLE_CHAR_OPTION_COMBINABLE) ? 1 : 0;
       }
@@ -630,7 +615,11 @@ sub parse_command_line(+;+) {
 
   foreach (@$orig_args) {
     if (/$command_line_option_re/oax) {
-      my $name = $2;
+      my $fullname = $1;
+
+      my ($modifier, $name) = ($fullname =~ $modifier_and_option_name_re);
+      $name = ((!exists $aliases->{$fullname}) && (defined $modifier) && (defined $name)) ? $name : $fullname;
+
       if (exists $aliases->{$name}) 
         { push @args, $_; next; }
 
@@ -684,7 +673,10 @@ sub parse_command_line(+;+) {
         next;
       }
 
-      my ($modifier, $name, $value) = ($1, $2, $3);
+      my ($fullname, $value) = ($1, $2);
+
+      my ($modifier, $name) = ($fullname =~ $modifier_and_option_name_re);
+      $name = ((!exists $aliases->{$fullname}) && (defined $modifier) && (defined $name)) ? $name : $fullname;
 
       if (!exists $aliases->{$name}) {
         $invalid_arg_warning_message = 'Unknown option '.format_quoted($name);
@@ -707,7 +699,7 @@ sub parse_command_line(+;+) {
         $varref = \ {$option_names_to_values->{$name}};
       }
 
-      my $implied_value = $option_name_modifier_to_implied_value{$modifier // 'enable'} // 1;
+      my $implied_value = $boolean_words{$modifier // 'enable'} // 1;
 
       $implied_value = ($implied_value < 0) ? -1 : 
         (($implied_value) ? $default_value_to_set : $default_value_to_reset);
@@ -887,7 +879,7 @@ sub print_command_line_options_help(+;+) {
   my $pagerfd = ($use_pager) ? (open_scrollable_stream() // $fd) : $fd;
 
   print($pagerfd print_folder_tab(Y.'Command Line Options Help:', R, ALIGN_LEFT));
-  print($pagerfd format_columns(@help, '  ', '  '));
+  print($pagerfd format_table(@help, colseps => '  ', row_prefix => '  '));
   print($pagerfd format_horiz_line(R_1_2, 'dashed'));
   print($pagerfd NL);
   close($pagerfd) if ($use_pager);

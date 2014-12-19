@@ -19,12 +19,11 @@ use MTY::Common::Hashes;
 use MTY::Common::Strings;
 use MTY::Filesystem::Files;
 use MTY::Common::Cache;
-#use MTY::Common::DirEntryCache;
 use MTY::Filesystem::FileStats;
 use MTY::Filesystem::EnhancedFileStats;
+use MTY::Filesystem::PathCache;
+use MTY::Filesystem::StatsCache;
 use MTY::RegExp::FilesAndPaths;
-
-#use parent 'MTY::Common::Cache';
 
 #
 # search_list_of_directories_for_file($filename, @dirlist):
@@ -34,31 +33,19 @@ use MTY::RegExp::FilesAndPaths;
 # "/absolute/dir/in/which/we/found/subdir/subsubdir/filename.ext")
 #
 
-# SUPER::__field_count__ => 7:
-
-noexport:; use constant {
-  cache        => 0,
-  absdirs      => 1,   # fully resolved absolute path of each directory in dirlist
-  basefds      => 2,   # O_PATH file descriptors corresponding to each directory in dirlist
-  timestamps   => 3,   # absolute directory path (includes both stem in absdirs *and* any explicitly queried subdirectories) => stat modification timestamp (mtime) of that directory
-};
-
 noexport:; sub search_dir_list_for_file(+$) {
   my ($this, $filename) = @_;
-  #print(STDERR 'search_dir_list_for_file: args = [ '.join(', ', @_).' ]'.NL);
 
-  my $fdlist = $this->[basefds];
-  my $absdirs = $this->[absdirs];
-  my $index = 0;
+  foreach my $dirinfo (@$this) {
+    next if (!is_array_ref($dirinfo));
+    my ($abs_dir_path, $fd, $stats, $hits) = @$dirinfo;
 
-  #print(STDERR '=> this '.$this.' $basefds = '.join(', ', @{$this->[basefds]}).NL);
+    my $abs_file_path = resolve_path($filename, $fd);
 
-  foreach $fd (@$fdlist) {
-    #print(STDERR '...search absdir #'.$index.' = '.($absdirs->[$index]).' with pathfd '.$fd.'...'.NL);
-    if (path_exists_relative_to_dir_fd($fd, $filename, 1)) {
-      return $absdirs->[$index].'/'.$filename;
+    if (defined $abs_file_path) {
+      $dirinfo->[3] = ++$hits;
+      return $abs_file_path;
     }
-    $index++;
   }
 
   return undef;
@@ -66,8 +53,49 @@ noexport:; sub search_dir_list_for_file(+$) {
 
 noexport:; sub dirlist($) {
   my ($this) = @_;
-  my $list = $this->[absdirs];
-  return (wantarray ? @$list : $list);
+  my @dirs = ( );
+  foreach my $info (@$this) {
+    next if (!is_array_ref($info));
+    push @dirs, $info->[0];
+  }
+
+  return (wantarray ? @dirs : \@dirs);
+}
+
+noexport:; sub get_perf_stats($) {
+  my ($this) = @_;
+  my $info = { };
+
+  my $total_files_queried = $cache_hits + $cache_misses;
+  my $total_files_found = 0;
+
+  my $cache = $this->[0];
+  my $hash_of_cache = $cache->get_hash();
+  my ($cache_hits, $cache_misses, $cache_flushes) = $cache->get_stats();
+  my $total_cache_entries = scalar keys %$hash_of_cache;
+  my $undef_cache_entries = 0;
+
+  foreach my $v (values %$hash_of_cache) 
+    { $undef_cache_entries += (!defined $v) ? 1 : 0; }
+
+  $info->{'.total.queries'} = $total_files_queried;
+  $info->{'.total.found'} = $total_files_found;
+  $info->{'.total.missing'} = $total_files_queried - $total_files_found;
+  $info->{'.unique.total'} = $total_cache_entries;
+  $info->{'.unique.undef'} = $undef_cache_entries;
+  $info->{'.unique.valid'} = $total_cache_entries - $undef_cache_entries;
+  $info->{'.cache.hits'} = $cache_hits;
+  $info->{'.cache.misses'} = $cache_misses;
+  $info->{'.cache.flushes'} = $cache_flushes;
+
+  foreach my $info (@$this) {
+    next if (!is_array_ref($info));
+    my ($abspath, $fd, $stats, $hits) = @$info;
+    $info->{$abspath} = $hits;
+    $total_files_found += $hits;
+  }
+
+  return $info;
 }
 
 noexport:; sub new($+;$) {
@@ -75,32 +103,40 @@ noexport:; sub new($+;$) {
   $label //= join(':', @$dirlist);
 
   my $cache = MTY::Common::Cache->new(\&search_dir_list_for_file, $label);
-
-  my $absdirs = [ ];
-  my $basefds = [ ];
-  my $timestamps = { };
+  my $this = [ $cache ];
 
   my %abspath_to_pathfd = ( );
 
   foreach $dirname (@$dirlist) {
-    my ($fd, $abspath) = resolve_and_open_path($dirname, undef, O_DIRECTORY);
+    my $fd = sys_open_path($dirname, undef, O_DIRECTORY);
 
-    next if ((!defined $fd) || (!defined $abspath));
+    if (!defined $fd) {
+      simple_warning('Ignoring non-existent or inaccessable search path "'.$dirname.'"');
+      next;
+    }
+
+    my $abspath = path_of_open_fd($fd);
 
     if (exists $abspath_to_pathfd{$abspath}) {
+      simple_warning('Ignoring duplicate search path "'.$dirname.'"'.
+        (($dirname ne $abspath) ? " (absolute path '$abspath')" : ''));
+
       sys_close($fd);
       next;
     }
 
-    my $mtime = get_mtime_of_fd($fd);
-    $abspath_to_pathfd{$abspath} = $fd;
-    $timestamps{$abspath} = $mtime;
+    my $stats = get_file_stats_of_fd($fd);
+    
+    my $searchable_dir_info = [
+      $abspath,
+      $fd,
+      $stats,
+      0, # hits in this directory
+    ];
 
-    push @$absdirs, $abspath;
-    push @$basefds, $fd;
+    push @$this, $searchable_dir_info;
   }
 
-  my $this = [ $cache, $absdirs, $basefds, $timestamps ];
   $cache->parent($this);
 
   return bless $this, $class;
@@ -110,26 +146,35 @@ noexport:; sub new($+;$) {
 
 noexport:; sub refresh($) {
   my ($this) = @_;
-  my $absdirs_to_refresh = (scalar @_) ? \@_ : $this->[absdirs];
-  #foreach my $dir (keys @$absdirs_to_refresh) {    
-  #}
+  # TODO
 }
 
 noexport:; sub invalidate($;$) {
   my ($this, $path) = @_;
-  return ($this->[cache])->invalidate($path);
+  my $cache = $this->[0];
+
+  return $cache->invalidate($path);
 }
 
 noexport:; sub get($;$) {
   my ($this, $subpath) = @_;
-  my $cache = $this->[cache];
+  my $cache = $this->[0];
+
   return $cache->get($subpath);
 }
 
 noexport:; sub close($) {
   my ($this) = @_;
-  foreach my $fd (@{$this->[basefds]}) { sys_close($fd); }
-  $this->[basefds] = undef;
+
+  my $cache = $this->[0];
+  if (defined $cache) { $cache->flush(); }
+
+  foreach my $info (@$this) {
+    next if (!is_array_ref($info));
+    my ($abspath, $fd) = @$info;
+    sys_close($fd);
+    $info = undef;
+  }
 }
 
 noexport:; sub DESTROY($) {
@@ -143,13 +188,11 @@ my $searchable_perl_lib_dirs;
 sub find_perl_module($;+) {
   my ($name, $pathlist) = @_;
 
-  # print("Called find_perl_module($name, ".($pathlist ? join(' ', @$pathlist) : 'undef').")".NL);
-
   $pathlist //= \@perl_lib_dirs;
 
   if ($name =~ /\.pm/oax) {
     # already is a filename: just return its full path
-    return realpath($name);
+    return resolve_path($name);
   }
 
   # Remove any .pm suffix so we don't redundantly add it again:
@@ -199,10 +242,3 @@ sub test_searchable_dir_list {
 }
 
 1;
-
-
-
-
-
-
-

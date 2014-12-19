@@ -27,6 +27,7 @@ use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;
 use MTY::Display::Scrollable;
 use MTY::Display::TextInABox;
+use MTY::Display::Table;
 use MTY::Display::Tree;
 use MTY::RegExp::Define;
 use MTY::RegExp::Tools;
@@ -101,9 +102,9 @@ my %command_line_options = (
   #
   'code' => [ \$print_code, 0, ['c', 'l', 'list', 'show', 'source', 's'] ],
   'query' => [ \$query_all_modules, 0, ['a'] ],
-  'filename-tree' => [ \$show_tree, 0, [ 'tree', 'filetree' ], TREE_TRUNK_FILENAMES ],
+  'filename-tree' => [ \$show_tree, 0, [ 'filetree' ], TREE_TRUNK_FILENAMES ],
   'package-tree' => [ \$show_tree, 0, [ 'module-tree', 'modtree' ], TREE_TRUNK_MODULE_PACKAGES ],
-  'namespace-tree' => [ \$show_tree, 0, [ 'nested-package-tree', 'nstree', 'ns' ], TREE_TRUNK_NAMESPACES ],
+  'namespace-tree' => [ \$show_tree, 0, [ 'tree', 'nested-package-tree', 'nstree', 'ns' ], TREE_TRUNK_NAMESPACES ],
   'table' => [ \$table_format, 0, 't' ],
   'showpath' => [ \$show_include_path, 0, ['i', 'showpaths', 'showinc'] ],
   'libdirs' => [ \$show_system_lib_dirs, 0, ['libs', 'showlibs', 'showlib', 'lib', 'stdlib', 'stdlibs', 'syslibs', 'sysdirs'] ],
@@ -140,7 +141,7 @@ my %command_line_options = (
   #
   # Flags for parse_and_check_command_line() (not actually options)
   #
-  '.arguments_required' => 1,
+  # '.arguments_required' => 1,
 );
 
 #-----------------------------------------------------------------------------
@@ -149,6 +150,8 @@ my %command_line_options = (
 # Find the .pm file of the specified fully qualified module name in the
 # current @INC path, or in the list specified by the second argument.
 #-----------------------------------------------------------------------------
+
+my @filenames = ( );
 
 # Don't be fooled by symlinks to redundant dirs:
 my %filename_to_package = ( );
@@ -262,7 +265,7 @@ sub format_module_filename($;$) {
 
   return (
     ($colorize)
-      ? $shortened_search_path_color.$search_path.$dir_component_color.$subdir.$G.$basename.$Y.$suffix
+      ? $shortened_search_path_color.$search_path.$dir_component_color.$subdir.G.$basename.Y.$suffix
       : $search_path.$subdir.$basename.$suffix);
 }
 
@@ -388,28 +391,32 @@ sub build_filename_tree() {
     my $packages = $filename_to_package{$filename} // [ ];
     my $node = [ ];
     my $formatted_filename = format_module_filename($filename, 1);
-    
-    if ((scalar @$packages) > 0) {
-      push @$node, [
-        [ TREE_CMD_SYMBOL, $G.dice_5_dots ],
-        $formatted_filename,
-        $K.' ('.$C.(scalar @$packages).$B.' packages'.$K.'):'.$X,
-      ];
-    } else {
-      push @$node, [
-        [ TREE_CMD_SYMBOL, $R.x_symbol ],
-        $formatted_filename,
-        $K.' ('.$R.'no package declarations!'.$K.')'.$X,
-      ];
+    my $n = scalar @$packages;
+    my $label = [
+      [ TREE_CMD_SYMBOL, ($n > 0) ? $G.dice_5_dots : $R.x_symbol ],
+      $formatted_filename,
+      [ TREE_CMD_FIELD ],
+    ];
+
+    if ($n == 0) {
+      push @$label, $K.'('.$R.'no package declarations!'.$K.')'.$X;
+    } elsif ($n == 1) {
+      push @$label, format_module_package_name($packages->[0], $Y, $C);
+    } else { # ($n > 1)
+      push @$label, $K.'('.$C.(scalar @$packages).$B.' packages'.$K.')'.$X;
     }
-    
-    foreach my $package (@$packages) {
-      push @$node, [[
-        [ TREE_CMD_SYMBOL, red_orange_fg.p_in_circle.' ' ],
-        format_module_package_name($package, $Y, $C),
-      ]];
+
+    push @$node, $label;
+
+    if ($n > 1) {
+      foreach my $package (@$packages) {
+        push @$node, [[
+          [ TREE_CMD_SYMBOL, red_orange_fg.p_in_circle.' ' ],
+          format_module_package_name($package, $Y, $C),
+        ]];
+      }
     }
-    
+
     push @$treeroot, $node;
   }
 
@@ -453,17 +460,40 @@ sub build_module_package_tree() {
 
 my $last_package_namespace_component_re = qr{(?: ::)? (\w+) $}oax;
 
+sub split_perl_package_namespace_into_inner_and_outer($) {
+  my ($package) = @_;
+  my @parts = split(/$double_colon_re/oax, $package);
+  my $inner = pop @parts;
+  return (join('::', @parts), $inner);
+}
+
 sub build_namespace_tree() {
   my $packages = [ sort keys %package_to_filename ];
   my $path_to_metadata = { };
 
+  my %containing_package_to_subpackage_count = ( );
+  foreach my $package (@$packages) {
+    my ($outer, $inner) = ($package =~ /$module_package_namespaces_re/oax);
+    $outer =~ s{\:\: $}{}oax;
+
+    if ((length $outer) > 0) {
+      $containing_package_to_subpackage_count{$outer}++;
+    }
+  }
+
+# use DDP; p %containing_package_to_subpackage_count;
+
   foreach my $package (@$packages) {
     my ($last_package_component) = ($package =~ /$last_package_namespace_component_re/oax);
-    my $name = ($print_fully_qualified_namespace_in_tree) 
-      ? format_module_package_name($package, Y, Y_1_2) 
+    my $subpackage_count = $containing_package_to_subpackage_count{$package} // 0;
+
+    my $name = ($print_fully_qualified_namespace_in_tree || ($subpackage_count > 0))
+      ? format_module_package_name($package, Y, Y_2_3) 
       : $last_package_component;
 
-    my $metadata = Y.$name.TAB;
+    my $metadata = Y.$name;
+    if ($subpackage_count > 0) { $metadata .= K.' ('.B.$subpackage_count.K.' subpackages)'; }
+    $metadata .= X.TAB;
 
     my $version = $package_to_version{$package};
     $metadata .= ((defined $version) ? M_3_4.'v'.M.$version : '').TAB;
@@ -478,9 +508,11 @@ sub build_namespace_tree() {
   }
 
   my $tree_of_hashes = delimited_paths_to_tree_of_hashes($packages, '::', $path_to_metadata);
+  #use DDP; p $tree_of_hashes;
   my $printable_tree = tree_of_hashes_to_printable_tree(
     $tree_of_hashes, R.U.'Module package namespaces'.UX.
       ' (found '.Y.sizeof(%package_to_filename).R.' packages):');
+  #use DDP; p $printable_tree;
   return $printable_tree;
 }
 
@@ -565,7 +597,7 @@ sub print_fields(+$) {
     $found++;
   }
   
-  print(format_delimited_columns([ sort @out ], TAB));
+  print(format_delimited_table([ sort @out ], TAB));
   
   return ((scalar @$modules_to_query) - $found);
 }
@@ -580,6 +612,9 @@ my %tree_type_to_builder_func = (
 # Main program:
 #
 
+if (!scalar @ARGV) {
+  @ARGV = ('-query', '-os', '-tree');
+}
 my ($requested_modnames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV);
 
 #
@@ -623,8 +658,17 @@ $search_path_list_re = qr{$search_path_list_re}oax;
 
 $shorten_search_paths //= (defined $show_tree) ? 1 : 0;
 
-my @short_name_keys = qw(privlib archlib vendorlib vendorarch sitelib sitearch); 
-%search_path_to_short_name = map { normalize_trailing_slash($Config{$_}) => $_ } @short_name_keys;
+my @perl_config_dirs = qw(privlib archlib vendorlib vendorarch sitelib sitearch); 
+my %perl_config_dirs_to_short_names = (
+  privlib => 'perl',
+  archlib => 'perl/arch',
+  vendorlib => 'vend',
+  vendorarch => 'vend/arch',
+  sitelib => 'site',
+  sitearch => 'site/arch',
+);
+
+%search_path_to_short_name = map { normalize_trailing_slash($Config{$_}) => $perl_config_dirs_to_short_names{$_} } @perl_config_dirs;
 
 my $perl_libs_base_dir = (($Config{sitelib_stem} // '/usr/lib/perl5/site_perl') =~ s{/site_perl$}{}roax).'/';
 $search_path_to_short_name{$perl_libs_base_dir} = 'perllibs';
@@ -667,8 +711,6 @@ sub filter_pm_or_al_files {
   if ($fullpath =~ /$pm_or_al_filename_re/oax) 
     { $filename_to_package{$fullpath} = [ ]; }
 }
-
-my @filenames = ( );
 
 if ($query_all_modules || ((scalar @update_module_package_to_filename_caches) > 0)) {
   File::Find::find({wanted => \&filter_pm_or_al_files}, @search_path_list);
@@ -736,7 +778,7 @@ if (defined $show_tree) {
 } elsif ($show_include_path) {
   print(join(NL, @search_path_list));
 } elsif ($show_system_lib_dirs) {
-  print_columns(STDOUT, invert_hash(%search_path_to_short_name), ' => ', '');
+  print_table(STDOUT, invert_hash(%search_path_to_short_name), ' => ', '');
 } elsif ((scalar @update_module_package_to_filename_caches) > 0) {
   foreach my $cachedir (@update_module_package_to_filename_caches) {
     update_module_package_to_filename_cache($cachedir);

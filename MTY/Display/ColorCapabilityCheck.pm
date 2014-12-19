@@ -26,7 +26,9 @@ use MTY::System::POSIX;
 use MTY::Common::Common;
 use MTY::Common::Hashes;
 use MTY::Common::Strings;
+use MTY::Common::EnvVarDefaults;
 use MTY::Filesystem::Files;
+use MTY::Filesystem::FileStats;
 use MTY::Filesystem::ProcFS;
 use MTY::Filesystem::OpenFiles;
 use MTY::System::Misc;
@@ -108,13 +110,13 @@ sub colorize_debug_log($) {
 }
 
 sub is_filehandle_color_capable($) {
-  my $handle = $_[0];
-  my $fd = fileno($handle);
+  my ($handle_or_fd) = @_;
+  my $fd = get_native_fd($handle_or_fd) // -1;
   if ($fd < 0) { return 0; }
 
   if (defined $fd_color_capabilities[$fd])
     { return $fd_color_capabilities[$fd]; }
-  
+
   #
   # Only use color mode and fancy symbols if the specified file descriptor
   # for this process is actually connected to one of the following:
@@ -178,7 +180,7 @@ sub is_filehandle_color_capable($) {
   #      way of telling this module to enable the color codes unconditionally).
   #
 
-  my $colorterm = $ENV{'COLORTERM'};
+  my $colorterm = $ENV{'COLORTERM'} // '';
   if ($colorterm =~ /^\d+$/oax) { $colorterm = 'xterm-256color'; }
 
   my $origterminal = lc(first_specified($ENV{'REMOTE_TERMINAL'}, $ENV{'TERM'}, $ENV{'COLORTERM'}, 'dumb'));
@@ -214,15 +216,17 @@ sub is_filehandle_color_capable($) {
       'terminal_color_capabilities = '.$terminal_color_capabilities.NL);
   }
 
-  if (-t *{$handle}) {
+  my $fdtype = get_fd_type($fd);
+
+  if (isatty($fd)) {
     colorize_debug_log('fd '.$fd.' is a terminal => capabilities = '.
                    $terminal_color_capabilities);
     $fd_color_capabilities[$fd] = $terminal_color_capabilities;
-  } elsif (-f *{$handle}) {
+  } elsif ($fdtype == FILE_TYPE_FILE) {
     colorize_debug_log('fd '.$fd.' is redirected into a file: color disabled');
     # fd is redirected to an ordinary file: don't use color (unless we force it on)
     $fd_color_capabilities[$fd] = 0;
-  } elsif (-p *{$handle}) {
+  } elsif ($fdtype == FILE_TYPE_PIPE) {
     # find the pid of the next command in the pipeline after us:
     my $consumer_pid = get_pid_of_first_consumer_of_fd($fd);
     colorize_debug_log('fd '.$fd.' is piped to '.
@@ -262,14 +266,12 @@ sub is_filehandle_color_capable($) {
   return $fd_color_capabilities[$fd];
 }
 
-my $failed_to_open_console_fd = 0;
-
 my $console_fd = undef;
 my $console_dev_path = undef;
 
 sub get_console_control_fd() {
-  if ($failed_to_open_console_fd) { return undef; }
-  if (defined $console_fd) { return $console_fd; }
+  if (defined $console_fd) 
+    { return ($console_fd >= 0) ? $console_fd : undef; }
 
   $console_dev_path = get_terminal_char_dev_path();
 
@@ -282,14 +284,17 @@ sub get_console_control_fd() {
   colorize_debug_log('get_console_control_fd(): current terminal\'s '.
     'character device node path = '.$console_dev_path);
 
-  sysopen(my $fd, $console_dev_path, O_RDWR);
-  if (!defined $fd) {
+  colorize_debug_log('STDOUT refers to '.(path_of_open_fd(STDOUT_FD) // '<closed>'));
+  colorize_debug_log('STDERR refers to '.(path_of_open_fd(STDERR_FD) // '<closed>'));
+
+  $console_fd = sys_open($console_dev_path, O_RDWR);
+
+  if (!defined $console_fd) {
     colorize_debug_log('get_console_control_fd(): cannot open '.$console_dev_path);
-    $failed_to_open_console_fd = 1;
+    $console_fd = -1;
     return undef;
   }
 
-  $console_fd = $fd;
   return $console_fd;
 }
 
@@ -311,26 +316,56 @@ sub is_stdout_color_capable() { return is_filehandle_color_capable(STDOUT); }
 sub is_stderr_color_capable() { return is_filehandle_color_capable(STDERR); }
 
 INIT {
-  $colorize_env_var = $ENV{'COLORIZE'};
-  if (defined $colorize_env_var) {
-    foreach (split(/\s+/, $colorize_env_var)) {
-      colorize_debug_log('COLORIZE environment variable argument = "'.$_.'"');
-      if ($_ eq '-debug') {
-        colorize_debug_log('enabled debugging of color capabilities checking');
-        $debug_colorize = 1;
-      } elsif (/^-(?: disable(?:d)? | no(?:color)? | off)/oax) {
-        for (my $i = 255; $i >= 0; $i--) { $fd_color_capabilities[$i] = 0; }
+  my $disable = undef;
+  my $enable = undef;
+  my $enhanced = undef;
+
+  my %colorize_defaults = get_defaults_from_env({ 
+    debug => \$debug_colorize,
+
+    disable => \$disable,
+    disabled => \$disable,
+    nocolor => \$disable,
+    off => \$disable,
+    no => \$disable,
+
+    enable => \$enable,
+    color => \$enable,
+    on => \$enable,
+    yes => \$enable,
+
+    enhanced => \$enhanced,
+  }, 'COLORIZE');
+
+  if (scalar keys %colorize_defaults) {
+    colorize_debug_log('COLORIZE environment variable set to "'.$colorize_defaults{''}.'":');
+    while (my ($key, $value) = each %colorize_defaults) { colorize_debug_log('  '.$key.' = '.$value); }
+
+    if ($debug_colorize) { colorize_debug_log('enabled debugging of color capabilities checking'); }
+
+    $disable = (defined $disable) ? ($boolean_words{$disable} // 1) : 0;
+
+    if ($disable) {
+      foreach my $fd (STDOUT_FD, STDERR_FD) 
+        { $fd_color_capabilities[$fd] = 0; }
+
+      for (my $i = 255; $i >= 0; $i--) { $fd_color_capabilities[$i] = 0; }
         colorize_debug_log('COLORIZE environment variable has unconditionally '.
-                       'disabled color output on all file descriptors');
-      } elsif (/-((?: no- | enhanced-)?)colorize-fd=(\d+)/oax) {
-        my $fd = $2;
-        $fd_color_capabilities[$fd] = 
-          ($1 eq 'no-') ? 0 : 
-          ($1 eq 'enhanced-') ? 2 : 1;
-        colorize_debug_log('COLORIZE environment variable overrides color '.
-                           'capability level for fd '.$fd.'; now set to '.
-                           $fd_color_capabilities[$fd]);
-      }
+                           'disabled color output on all file descriptors');
+    }
+
+    $enable = (defined $enable) ? ($boolean_words{$enable} // 1) : 0;
+
+    $enhanced = (defined $enhanced) ? ($boolean_words{$enhanced} // 1) : 0;
+    $enable |= $enhanced;
+
+    if ($enable || $disable) {
+      foreach my $fd (STDOUT_FD, STDERR_FD) 
+        { $fd_color_capabilities[$fd] = ($enable) ? (($enhanced) ? 2 : 1) : ($disable) ? 0 : undef; }
+      colorize_debug_log('COLORIZE environment variable has unconditionally '.
+                           ($enable ? 'enabled' : $disable ? 'disabled' : undef).
+                           ($enhanced ? ' enhanced' : '').
+                           ' color output on all file descriptors');
     }
   }
 };

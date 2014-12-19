@@ -1,9 +1,18 @@
 #!/usr/bin/perl -w
 # -*- cperl -*-
 #
-# nocolor: remove ANSI console color and formatting escape codes 
-# from any text read from stdin, and write the stripped (and thus
-# colorless) version to stdout
+# nocolor: 
+#
+# Removes ANSI console color and formatting escape codes from any text 
+# read from stdin, and write the stripped (and thus colorless) version 
+# to stdout. Also optionally converts Unicode characters to '?' symbols.
+#
+# The -show option will instead print the actual escape codes (without
+# the real escape character) for debugging colorized output
+#
+# The -check option will check if stdout (or the file descriptor specified
+# by '-check=<fd>') is capable of colorized output, and will exit with 
+# exit code 0 if it is capable, or 255 otherwise, without printing anything.
 #
 # Copyright 2003-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
 #
@@ -24,9 +33,12 @@ use IPC::Open3;
 
 my $strip_color_codes = 1;
 my $is_conditional_on_fd = undef;
+my $is_check = undef;
 my $replace_utf8_with = undef;
 my $show_color_codes = 0;
 my $show_color_codes_without_pretty_printing = 0; 
+my $pass_option_if_use_color = undef;
+my $pass_option_if_no_color = undef;
 
 if ($0 =~ /nocolor-(?:cond|if)$/oax) { $is_conditional_on_fd = 1; }
 
@@ -37,10 +49,20 @@ my @args_for_program = ( );
 foreach $arg (@ARGV) {
   if ($rest_are_args_for_program) {
     push @args_for_program,$arg;
+  } elsif ($arg =~ /^-(?: check | \?) (?: = (?: (\d+) | (stdout|stderr)))?/oax) {
+    $check_fd = 
+      (defined $2) ? (($2 eq 'stdout') ? STDOUT_FD : STDERR_FD) :
+      (defined $1) ? $1 : STDOUT_FD; # (check stdout by default)
   } elsif ($arg =~ /^-c (?:ond)? (?: = (?: (\d+) | (stdout|stderr)))?/oax) {
     $is_conditional_on_fd = 
       (defined $2) ? (($2 eq 'stdout') ? STDOUT_FD : STDERR_FD) :
       (defined $1) ? $1 : STDOUT_FD; # (check stdout by default)
+  } elsif ($arg =~ /^-yes(?:opt)? = (.+)/oax) {
+    $is_conditional_on_fd //= STDOUT_FD;
+    $pass_option_if_use_color = $1;
+  } elsif ($arg =~ /^-no(?:opt)? = (.+)/oax) {
+    $is_conditional_on_fd //= STDOUT_FD;
+    $pass_option_if_no_color = $1;
   } elsif ($arg =~ /^-(no-)?u(?:tf8)? (?: = (\w*))?/oax) {
     $replace_utf8_with = (($1 // '') eq 'no-') ? '' : ($2 // ' ');
   } elsif ($arg =~ /^-s(?:how)? (-(?:raw|straight|non-fancy|simple))? (?:-codes)?/oax) {
@@ -52,6 +74,34 @@ foreach $arg (@ARGV) {
     $rest_are_args_for_program = 1;
   } else {
     print(STDERR "$0: warning: unknown option '$arg'\n");
+  }
+}
+
+if (defined $check_fd) { $is_conditional_on_fd = $check_fd; }
+
+if (defined $is_conditional_on_fd) {
+  my $fd = $is_conditional_on_fd;
+  $fd = ($fd == STDOUT_FD) ? STDOUT : ($fd == STDERR_FD) ? STDERR : undef;
+  if (is_filehandle_color_capable($fd)) { $strip_color_codes = 0; }
+}
+
+if (defined $check_fd) { exit(($strip_color_codes) ? 255 : 0); }
+
+if ((defined $pass_option_if_use_color) || (defined $pass_option_if_no_color)) {
+  #
+  # If the option string for the opposite case isn't specified,
+  # this implies the called program assumes that case by default:
+  #
+  $pass_option_if_use_color //= '';
+  $pass_option_if_no_color //= '';
+
+  my $option = ($strip_color_codes ? $pass_option_if_no_color : $pass_option_if_use_color);
+  @args_for_program = ($option, @args_for_program);
+
+  if (defined $program_to_exec) {
+    # print(STDERR "exec program $program_to_exec with args ".join('|', @args_for_program).NL);
+    exec($program_to_exec, @args_for_program) ||
+      die("$0: Cannot execute '$program_to_exec'");
   }
 }
 

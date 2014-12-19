@@ -343,11 +343,17 @@ our $perl_sub_decl_re = compile_regexp(
       (*:sub_decl)
      }oamsx, 'perl_sub_decl');
 
-our $perl_identifier_sigil_and_symbol_re = qr{(([\$\@\%\=]?)(\w++))}oax;
+our $perl_identifier_sigil_and_symbol_re = compile_regexp(
+  qr{(([\$\@\%\=]?)(\w++))}oax,
+  'perl_identifier_sigil_and_symbol');
 
-our $perl_package_name_re = qr{(?> [A-Za-z\_] \w*+ (?> \:\: \w++)*+)}oamsx;
+our $perl_package_name_re = compile_regexp(
+  qr{(?> [A-Za-z\_] \w*+ (?> \:\: \w++)*+)}oamsx,
+  'perl_package_name_re');
 
-our $perl_package_decl_re = qr{^ \s*+ (package) \s++ ($perl_package_name_re) \s*+ ;}oamsx;
+our $perl_package_decl_re = compile_regexp(
+  qr{^ \s*+ (package) \s++ ($perl_package_name_re) \s*+ ;}oamsx,
+  'perl_package_decl_re');
 
 our $perl_identifier_decl_or_use_re = compile_regexp(
   qr{(?|

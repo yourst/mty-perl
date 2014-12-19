@@ -164,7 +164,6 @@ sub get_cap_group($$) {
 
 sub get_entire_match($) {
   my ($s) = @_;
-  # local (*s) = \ (@_);
 
   return substr($s, $-[0], $+[0] - $-[0]);
 }
@@ -361,7 +360,6 @@ sub matches_regexp_list($+) {
 #
 sub parse_non_overlapping($$) {
   my ($input, $regexp) = @_;
-  # local (*input, *regexp) = \ (@_);
 
   my @list = ();
   while ($input =~ /$regexp/oamsgc) { push(@list, $1); }
@@ -412,7 +410,6 @@ sub split_using_prefix_regexp($$) {
 
 sub subst_percent_prefixed_single_chars_using_hash_of_mappings($+) {
   my ($s, $h) = @_;
-  # local (*s, *h) = \ (@_);
 
   $s =~ s{(?: \A | [^\\]) \K \%(.)}{$h->{$1} // ('%'.$1)}oamsxge;
   return interpolate_control_chars($s);

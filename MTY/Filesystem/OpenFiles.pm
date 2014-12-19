@@ -152,6 +152,7 @@ sub get_real_command_name_of_pid(;$) {
   my $pid = $_[0] // getpid();
 
   my @cmdline = read_proc_null_sep_array($pid, 'cmdline');
+
   if (!@cmdline) { 
     my $exe = read_proc($pid, 'exe') // 'unknown';
     @cmdline = ($exe);
@@ -160,11 +161,11 @@ sub get_real_command_name_of_pid(;$) {
   my $cmd = basename(shift @cmdline);
 
   # interpreters are often prefixed with 'env' to set up their environment:
-  if ($cmd eq 'env') { $cmd = basename(shift(@cmdline)); }
+  if ($cmd eq 'env') { $cmd = basename(shift @cmdline); }
 
   # we want to know the actual script being interpreted:
-  if ($cmd =~ /$interpreter_cmd_names_re/oamsx) {
-    do { $cmd = shift @cmdline; } until ($cmd !~ /^-/oa);
+  if (($cmd =~ /$interpreter_cmd_names_re/oamsx) && (scalar @cmdline)) {
+    do { $cmd = shift @cmdline; } until (($cmd // '') !~ /^-/oa);
     # by this point we should *finally* know the real name of the script:
     $cmd = basename($cmd // 'unknown');
   }

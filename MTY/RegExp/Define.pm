@@ -32,7 +32,6 @@ my $compiled_regexp_count = 0;
 
 sub compile_regexp($;$$+) {
   my ($regexp_ref, $name, $description, $capture_groups) = @_;
-  # local (*regexp_ref, *name, *description, *capture_groups) = \ (@_);
 
   $name = $name // ('regexp'.$compiled_regexp_count);
   $compiled_regexps{$name} = $regexp_ref;
@@ -153,7 +152,6 @@ sub generate_regexp_to_match_any_string_in_list(+) {
 
 sub compile_regexp_ext($;$$+) {
   my ($regexp_ref, $name, $description, $capture_groups) = @_;
-  # local (*regexp_ref, *name, *description, *capture_groups) = \ (@_);
 
   my $regexp = ${$regexp_ref};
 
@@ -172,7 +170,6 @@ sub compile_regexp_ext($;$$+) {
 
 sub compile_regexp_list_of_alternatives(+;$$$$+) {
   my ($regexp_list, $prefix, $toplevel_label, $name, $description, $capture_groups) = @_;
-  # local (*regexp_list, *prefix, *toplevel_label, *name, *description, *capture_groups) = \ (@_);
 
   $name //= ('regexp'.$compiled_regexp_count);
   $prefix //= '';

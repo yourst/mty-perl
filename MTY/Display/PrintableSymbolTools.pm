@@ -39,7 +39,6 @@ INIT {
 
 sub utf8_encode_str($) {
   my ($s) = @_;
-  # local (*s) = \ (@_);
 
   if (!defined($s)) { return undef; }
   $s = "$s";
@@ -49,7 +48,6 @@ sub utf8_encode_str($) {
 
 sub utf8_encode_int($) {
   my ($s) = @_;
-  # local (*s) = \ (@_);
 
   if (!defined($s)) { return undef; }
   return utf8_encode_str(chr($s));
@@ -57,7 +55,6 @@ sub utf8_encode_int($) {
 
 sub utf8_decode_to_str($) {
   my ($s) = @_;
-  # local (*s) = \ (@_);
 
   if (!defined($s)) { return undef; }
   $s = "$s";
@@ -67,7 +64,6 @@ sub utf8_decode_to_str($) {
 
 sub utf8_decode_to_int($) {
   my ($s) = @_;
-  # local (*s) = \ (@_);
 
   if (!defined($s)) { return undef; }
   return ord(utf8_decode_to_str($s));
@@ -221,7 +217,6 @@ sub format_string_or_undef($) {
 
 sub format_quoted($;$$) {
   my ($v, $maxlength, $include_char_count) = @_;
-  # local (*v, *maxlength, *include_char_count) = \ (@_);
 
   my $n = printed_length($v) // 0;
 
@@ -240,7 +235,6 @@ sub format_quoted($;$$) {
 
 sub format_chunk($;$$$$) {
   my ($chunk, $maxlength, $subst_newlines, $color, $sym_color) = @_;
-  # local (*chunk, *maxlength, *subst_newlines, *color, *sym_color) = \ (@_);
 
   $maxlength //= 120;
   $subst_newlines //= 1;
@@ -306,7 +300,6 @@ sub full_width_unicode_chars_for_string($) {
 
 sub expand_with_spacers($;$) {
   my ($text, $spacer) = @_;
-  # local (*text, *spacer) = \ (@_);
 
   $spacer //= ' ';
 

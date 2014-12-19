@@ -1,8 +1,6 @@
 #!/usr/bin/perl -w
 #use strict;
 use File::Find();
-use File::Basename qw(dirname basename dirname);
-use Cwd qw(getcwd abs_path);
 
 # Set the variable $File::Find::dont_use_nlink if you're using AFS,
 # since AFS cheats.
@@ -90,8 +88,8 @@ sub check_and_rename {
   my $remove_dup_seps = qr/[\-\+\%\_]\K[\-\+\%\_]+/oams;
 
   my ($name) = @_;
-  my $filename = basename($name);
-  my $dirname = dirname($name);
+  my $filename = basename_of($name);
+  my $dirname = directory_of($name);
 
   my $newname = ($filename =~ s/$rmspaces_blanks_re/-/roamsg);
   $newname =~ tr/&$|/+%_/;

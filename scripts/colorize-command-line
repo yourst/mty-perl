@@ -5,12 +5,6 @@
 # Copyright 2014 Matt T. Yourst <yourst@yourst.com>
 #
 
-use Cwd 'realpath';
-use File::Basename 'dirname';
-
-#! autoimport {
-#! } # (end autoimport)
-
 # Note: gcc now uses Unicode quotes if LANG=en_US.UTF-8, so use the UTF-8 encodings of these,
 # or simply disable UTF-8 to use regular "'" quotes:
 #$LEFTQUOTE = "\x{e28098}"

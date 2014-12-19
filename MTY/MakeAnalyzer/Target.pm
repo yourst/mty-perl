@@ -109,7 +109,6 @@ sub add_implicit_targets_to_target_list(+) {
 
 sub format_target(+) {
   my ($t) = @_;
-  # local (*t) = \ (@_);
 
   my $tree = [ 
     [ 
@@ -161,7 +160,6 @@ sub format_target(+) {
 
 sub print_target($;$) {
   my ($target, $fd) = @_;
-  # local (*target, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -171,7 +169,6 @@ sub print_target($;$) {
 
 sub print_targets(+;$) {
   my ($targets, $fd) = @_;
-  # local (*targets, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -196,7 +193,6 @@ sub print_targets(+;$) {
 
 sub print_targets_in_category(+$;$) {
   my ($tgtlist, $category, $fd) = @_;
-  # local (*tgtlist, *category, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -210,7 +206,6 @@ sub print_targets_in_category(+$;$) {
 
 sub print_targets_in_all_categories(+;$) {
   my ($categories, $fd) = @_;
-  # local (*categories, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -237,7 +232,6 @@ my $target_summary_format =
 
 sub print_summary_of_target(+;$) {
   my ($t, $fd) = @_;
-  # local (*t, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -267,7 +261,6 @@ sub print_summary_of_target(+;$) {
 
 sub print_summary_of_targets(+;+$) {
   my ($targets, $categories, $fd) = @_;
-  # local (*targets, *categories, *fd) = \ (@_);
 
   $fd //= STDOUT;
 
@@ -281,7 +274,6 @@ sub print_summary_of_targets(+;+$) {
 
 sub dump_target(+) {
   my ($t) = @_;
-  # local (*t) = \ (@_);
 
 
   my $name = $t->{name};
@@ -322,7 +314,6 @@ sub dump_target(+) {
 
 sub dump_targets_in_category(+$) {
   my ($tgtlist, $category) = @_;
-  # local (*tgtlist, *category) = \ (@_);
 
 
   my $out = NL.'#'.NL.'# '.$category.': '.
@@ -338,7 +329,6 @@ sub dump_targets_in_category(+$) {
 
 sub targets_to_dep_lists(+;$$) {
   my ($targets, $include_normal_deps, $include_order_only_deps) = @_;
-  # local (*targets, *include_normal_deps, *include_order_only_deps) = \ (@_);
 
   $include_normal_deps //= 1;
   $include_order_only_deps //= 1;
@@ -371,7 +361,6 @@ my %type_to_abbrev = (
   
 sub target_dep_lists_to_printable_tree_labels(++;++) {
   my ($targets, $target_names_to_deps, $target_names) = @_;
-  # local (*targets, *target_names_to_deps, *target_names) = \ (@_);
 
   my %target_names_to_labels = ( );
 
@@ -429,7 +418,6 @@ sub target_dep_lists_to_printable_tree_labels(++;++) {
 
 sub print_dependency_tree_from_target_deps_and_labels(+$++;$+) {
   my ($t, $target_name, $target_names_to_deps, $target_names_to_labels, $outfd, $visited) = @_;
-  # local (*target_name, *target_names_to_deps, *target_names_to_labels, *outfd) = \ (@_);
 
   $outfd //= STDOUT;
   
@@ -456,7 +444,6 @@ sub print_dependency_tree_from_target_deps_and_labels(+$++;$+) {
 
 sub print_dependency_trees_for_all_targets(+;$$$$) {
   my ($targets, $outfd, $target_names_to_deps, $target_names_to_labels, $target_names) = @_;
-  # local (*targets, *outfd, *target_names_to_deps, *target_names_to_labels, *target_names) = \ (@_);
 
   $outfd //= STDOUT;
   # Optimization: if the caller already assembled an array of all target names,

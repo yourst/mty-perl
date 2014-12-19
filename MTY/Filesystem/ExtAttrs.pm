@@ -31,12 +31,21 @@ BEGIN {
   *sys_listxattr = *Linux::UserXAttr::listxattr;
 };
 
-sub set_xattrs($+;$) {
-  my ($path, $hash, $basefd) = @_;
-  $basefd //= AT_FDCWD;
+noexport:; sub open_if_path($;$) {
+  my ($path_or_fd, $mode) = @_;
+  $mode //= O_RDONLY;
 
-  my $fd = open_file_or_dir($path);
-  if (!(defined $fd)) { return undef; }
+  if (defined fileno($path_or_fd)) { return $path_or_fd; }
+
+  sysopen(my $fd, $path_or_fd, $mode) || return undef;
+  return $fd;
+}
+
+sub set_xattrs($+) {
+  my ($path_or_fd, $hash) = @_;
+
+  my $fd = open_if_path($path_or_fd);
+  if (!defined $fd) { return undef; }
 
   my $n = 0;
 
@@ -51,40 +60,39 @@ sub set_xattrs($+;$) {
     }
 
     if (!$ok) {
-      $fd->close();
+      close($fd);
       return -$n;
     }
   }
 
-  $fd->close();
+  close($fd);
   return $n;
 }
 
-sub set_xattr($$$;$) {
-  my ($path, $xattr_name, $xattr_value, $basefd) = @_;
-  $basefd //= AT_FDCWD;
+sub set_xattr($$$) {
+  my ($path, $xattr_name, $xattr_value) = @_;
 
   if (!sys_setxattr($path, $xattr_name, $xattr_value)) { return undef; }
   return 1;
 }
 
 sub remove_xattrs($+;$) {
-  my ($path, $xattr_names, $basefd) = @_;
+  my ($path_or_fd, $xattr_names) = @_;
 
-  my $fd = open_file_or_dir($path);
-  if (!(defined $fd)) { return undef; }
+  my $fd = open_if_path($path_or_fd);
+  if (!defined $fd) { return undef; }
 
   my $n = 0;
 
   foreach my $name (@{$xattr_names}) {
     $n++;
     if (!sys_removexattr($fd, $name)) {
-      $fd->close();
+      close($fd);
       return -$n;
     }
   }
 
-  $fd->close();
+  close($fd);
   return $n;
 }
 
@@ -96,32 +104,24 @@ sub remove_xattr($$;$) {
 }
 
 sub get_xattrs($;$) {
-  my ($path, $fd) = @_;
+  my ($path_or_fd) = @_;
 
-  if (!defined $fd) {
-    $fd = open_file_or_dir($path);
-    if (!(defined $fd)) { return undef; }
-  }
+  my $fd = open_if_path($path_or_fd);
+  if (!defined $fd) { return undef; }
 
-  my %xattrs = ( );
+  my $xattrs = { };
 
-  my $xattr_names = listxattr($fd);
-  if (!(defined $xattr_names)) { 
-    $fd->close();
-    return undef;
-  }
+  my @xattr_names = sys_listxattr($fd);
 
-  foreach my $name (@{$xattr_names}) {
-    my $value = sys_getxattr($fd, $name);
-    $xattrs{$name} = $value;
-  }
+  foreach my $name (@xattr_names) 
+    { $xattrs->{$name} = sys_getxattr($fd, $name); }
 
-  $fd->close();
-  return (wantarray ? %xattrs : \%xattrs);
+  close($fd);
+  return $xattrs;
 }
 
 sub get_xattr($$;$) {
-  my ($path, $xattr_name, $basefd) = @_;
+  my ($path, $xattr_name) = @_;
 
   return sys_getxattr($path, $xattr_name);
 }
@@ -129,14 +129,14 @@ sub get_xattr($$;$) {
 sub get_xattr_names($) {
   my ($path) = @_;
 
-  my @xattr_names = listxattr($path);
+  my @xattr_names = sys_listxattr($path);
   return (wantarray ? @xattr_names : \@xattr_names);
 }
 
 sub has_xattrs($;$) {
-  my ($path, $basefd) = @_;
+  my ($path) = @_;
 
-  my @xattr_names = listxattr($path);
+  my @xattr_names = sys_listxattr($path);
   return (scalar @xattr_names);
 }
 

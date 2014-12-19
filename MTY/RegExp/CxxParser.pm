@@ -350,7 +350,6 @@ sub tokenize_cxx ($&;@) {
 
 sub cxx_tokenize_and_extract_strings($;+$) {
   my ($original, $extracted_strings, $DEBUG) = @_;
-  # local (*original, *extracted_strings, *DEBUG) = \ (@_);
 
 
   my ($leading_whitespace) = ($original =~ /$leading_whitespace_re/oamsxgc);
@@ -561,7 +560,6 @@ sub reinsert_extracted_strings($+) {
 
 sub parse_struct_def {
   my ($struct_class_union, $structname, $inheritance, $block) = @_;
-  # local (*struct_class_union, *structname, *inheritance, *block) = \ (@_);
 
 
   my @fields = ();
@@ -850,7 +848,6 @@ sub parse_struct_def {
 
 sub print_parsed_struct_fields($$+) {
   my ($struct_union_class, $structname, $fields) = @_;
-  # local (*struct_union_class, *structname, *fields) = \ (@_);
 
   $raw_data_type_word_index = 0;
   $count = scalar(@{$fields});
@@ -916,7 +913,6 @@ sub print_parsed_struct_fields($$+) {
 
 sub print_parsed_struct_function($$+) {
   my ($struct_union_class, $structname, $funcinfo) = @_;
-  # local (*struct_union_class, *structname, *funcinfo) = \ (@_);
 
   foreach my $k (@all_capture_group_names) { $$k = ''; }
   foreach my $k (keys %{$funcinfo}) { my $v = $funcinfo->{$k}; $$k = $v; }
@@ -952,7 +948,6 @@ sub print_parsed_struct_function($$+) {
 
 sub print_parsed_struct_functions($$+) {
   my ($struct_union_class, $structname, $functions) = @_;
-  # local (*struct_union_class, *structname, *functions) = \ (@_);
 
 
   print(STDERR $Y.'Functions in '.$M.$struct_union_class.' '.$C.$structname.$X.' '.$K.'{'.NL);
@@ -964,7 +959,6 @@ sub print_parsed_struct_functions($$+) {
 
 sub reconstruct_member_function($$+) {
   my ($struct_union_class, $structname, $funcinfo) = @_;
-  # local (*struct_union_class, *structname, *funcinfo) = \ (@_);
 
   foreach my $k (@all_capture_group_names) { $$k = ''; }
   foreach my $k (keys %{$funcinfo}) { my $v = $funcinfo->{$k}; $$k = $v; }
@@ -1004,7 +998,6 @@ sub reconstruct_member_function($$+) {
 
 sub reconstruct_member_functions($$+) {
   my ($struct_union_class, $structname, $functions) = @_;
-  # local (*struct_union_class, *structname, *functions) = \ (@_);
 
 
   foreach my $f (@{$functions}) {
@@ -1014,7 +1007,6 @@ sub reconstruct_member_functions($$+) {
 
 sub print_parsed_struct_typedefs($$+) {
   my ($struct_union_class, $structname, $typedefs) = @_;
-  # local (*struct_union_class, *structname, *typedefs) = \ (@_);
 
   $raw_data_type_word_index = 0;
 
@@ -1041,7 +1033,6 @@ sub print_parsed_struct_typedefs($$+) {
 
 sub print_parsed_struct_enums($$+) {
   my ($struct_union_class, $structname, $enums) = @_;
-  # local (*struct_union_class, *structname, *enums) = \ (@_);
 
   $raw_data_type_word_index = 0;
 
