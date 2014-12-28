@@ -154,7 +154,7 @@ sub get_current_uid_gid_groups() {
 }
 
 INIT {
-  $uid_to_username_cache->put(0, 'root');  
+  $uid_to_username_cache->put(0 => 'root');
   get_current_uid_gid_groups();
 };
 
@@ -167,9 +167,27 @@ my $user_info = undef;
 
 sub get_user_info() {
   if (!defined $user_info) {
-    my $uid = getuid();
-    my $gid = getgid();
+    #
+    # Note that get_user_info() returns the *effective* uid and gid,
+    # not the original real uid and gid. This is important from a
+    # security standpoint (especially for setuid or setgid callers).
+    # 
+    # It also controls the home directory this function returns 
+    # (e.g. get_user_info() in "sudo <perl-program> ..." will 
+    # return /home/root, not /home/<original-user-invoking-sudo>).
+    # This may affect where the caller finds per-user configuration
+    # files, since some users may prefer to always use their own
+    # config files even if using sudo, rather than root's settings.
+    # If this is desired, the caller will need to check this itself.
+    #
+    my $uid = geteuid();
+    my $gid = getegid();
 
+    #
+    # These are the fallback values we only use if getpwuid()
+    # below can't find the actual user info for our uid in
+    # /etc/passwd, LDAP, nscd, or whatever the system uses.
+    #
     $user_info = {
       uid => $uid,
       gid => $gid,
@@ -188,10 +206,17 @@ sub get_user_info() {
       $user_info->{shell} = $fields[8];
     }
   }
+
   return $user_info;
 }
 
-
+#
+# As noted for get_user_info(), this is the home directory
+# of the current effective user ID, not the original real
+# user ID (i.e. whomever ran sudo or su to execute the
+# program calling this function). Specifically, this will
+# return /home/root within a sudo session.
+#
 sub get_home_directory() {
   return get_user_info()->{home_dir};
 }

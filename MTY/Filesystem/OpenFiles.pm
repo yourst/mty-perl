@@ -133,6 +133,11 @@ sub get_pid_of_first_consumer_of_fd($) {
   my $stdout_fd_target = pid_and_fd_to_target_filename_or_anon_inode($my_pid, $fd);
   my $pidlist = get_pids($my_pid + 1);
   my $consumer_pid = first_pid_with_fd_open_on($stdout_fd_target, 0, $pidlist);
+  if (!defined $consumer_pid) {
+    # Try it again with all pids this time:
+    $pidlist = [ grep { ($_ != $my_pid) } get_pids() ];
+    $consumer_pid = first_pid_with_fd_open_on($stdout_fd_target, 0, $pidlist);
+  }
   return $consumer_pid;
 }
 

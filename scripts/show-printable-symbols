@@ -18,7 +18,9 @@ use MTY::Display::TextInABox;
 use MTY::Display::Scrollable;
 use MTY::Display::PrintableSymbolTools;
 use MTY::Display::PrintableSymbols;
-use MTY::RegExp::All;
+use MTY::RegExp::Tools;
+use MTY::RegExp::PerlSyntax;
+use MTY::RegExp::Numeric;
 
 use Unicode::String qw(utf8);
 
@@ -63,21 +65,23 @@ my @found_by_to_color = (
 sub expand_sym_list(+) {
   my ($initial_list) = @_;
 
-  my @sym_list = ( );
+  my %sym_set = ( );
+
+  my $re = join('|', map { ($show_all_wildcard_matches) ? $_ : '\A'.$_.'\Z' } grep { $_ =~ /$perl_identifier_re/oax } @$initial_list);
+  $re = qr{$re}oax;
 
   foreach my $name (@$initial_list) {
     if ($name =~ /^[A-Za-z_]\w*$/) {
       if ((exists $symbols{$name}) && (!$show_all_wildcard_matches)) {
-        push @sym_list, [ $name, $symbols{$name}, FOUND_EXACT_NAME ];
+        $sym_set{$name} = [ $name, $symbols{$name}, FOUND_EXACT_NAME ];
       } else {
         # Try to search for it like *str* wildcards were used:
-        my $re = qr{$name}ax;
         my $found = 0;
         foreach $s (@symbol_names) {
           if ($s =~ /$re/oax) { 
             my $symbol = $symbols{$s} // 0x0000;
-            push @sym_list, [ $s, $symbol, FOUND_WILDCARD_NAME ];
-            $found++; 
+            $sym_set{$s} = [ $s, $symbol, ($s eq $name) ? FOUND_EXACT_NAME : FOUND_WILDCARD_NAME ];
+            $found++;
           }
         }
         if (!$found) { die("Cannot find symbols named '$name', nor any other symbol names containing '$name'"); }
@@ -87,13 +91,16 @@ sub expand_sym_list(+) {
       if (!(defined $code)) { warn('Invalid character number '.$name); next; }
       my $found_name = $char_id_to_name{$code};
       if (defined $found_name) {
-        push @sym_list, [ $found_name, $symbols{$found_name}, FOUND_NAME_FROM_CODE ];
+        $sym_set{$found_name} = [ $found_name, $symbols{$found_name}, FOUND_NAME_FROM_CODE ];
       } else {
-        push @sym_list, [ sprintf('0x%04x', $code), chr($code), UNNAMED_CODE_ONLY ];
+        my $code_name = sprintf('0x%04x', $code);
+        $sym_set{$code_name} = [ $code_name, chr($code), UNNAMED_CODE_ONLY ];
       }
     }
   }
-  
+
+  my @sym_list = map { $sym_set{$_} } sort keys %sym_set;
+
   return (wantarray ? @sym_list : \@sym_list);
 }
 

@@ -1,12 +1,7 @@
 #!/usr/bin/perl -w
 # -*- cperl-*-
 #
-# perlwhich: 
-#
-# Find Perl modules by their package names (e.g. Module::Name::Here),
-# or list the package(s) declared in the specified *.pm Perl source files, or
-# print a graphical tree by filenames (*.pm), Module::Names, or the nested
-# namespace hierarchy of modules.
+# print-table:
 #
 # Copyright 2003-2014 Matt T Yourst <yourst@yourst.com>. All rights reserved.
 #
@@ -41,7 +36,13 @@ my %command_line_options = (
   'align', [ \@alignments, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ 'a', 'alignment' ], \%alignment_name_to_value ],
 );
 
-my ($filenames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV);
+my %command_line_help = (
+  'width' => 'Maximum width in characters of the entire table',
+  'separator' => 'Separator character(s) in the input which define the boundaries between columns (default is any of: tab, "," or ";")',
+  'align' => 'Alignment of text within columns, either as a single value for all columns, or a comma separated list of per-column alignments. The possible alignments are "left", "center", "right", or equivalently, "l", "c", "r".',
+);
+
+my ($filenames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, %command_line_help);
 
 my $is_stdout_terminal = (-t STDOUT) ? 1 : 0;
 $max_line_width //= ($is_stdout_terminal) ? get_terminal_width_in_columns() : undef;
@@ -49,7 +50,7 @@ $max_line_width //= ($is_stdout_terminal) ? get_terminal_width_in_columns() : un
 $separator //= '[\t\\,\;]';
 my $separator_re = qr{$separator}oax;
 
-my @lines = read_file_handle(STDIN_FD);
+my @lines = read_file_handle_as_lines(STDIN_FD);
 my @table = ( );
 
 foreach my $line (@lines) {

@@ -111,7 +111,7 @@ sub colorize_debug_log($) {
 
 sub is_filehandle_color_capable($) {
   my ($handle_or_fd) = @_;
-  my $fd = get_native_fd($handle_or_fd) // -1;
+  my $fd = (get_native_fd($handle_or_fd)) // -1;
   if ($fd < 0) { return 0; }
 
   if (defined $fd_color_capabilities[$fd])

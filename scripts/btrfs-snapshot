@@ -1,5 +1,15 @@
 #!/usr/bin/perl -w
 # -*- cperl -*-
+#
+# btrfs-snapshot:
+#
+# Create, delete, rotate and list BtrFS subvolume snapshots in arbitrary
+# periodic categories (hourly, daily, weekly, monthly, etc)., automatically
+# named as e.g. 'daily@2014.mm.dd-HH-MM-SS', with a specified number of
+# snapshots in each category with descending timestamps in the past.
+#
+# Copyright 2012 - 2014 Matt T. Yourst <yourst@yourst.com>
+#
 
 use integer; use warnings;
 
@@ -77,6 +87,16 @@ sub show_help {
     '                 it will automatically be created.'.NL.
     NL.
     $Y.'  -delete '.$G.'/name'.$K.': '.$X.'Delete the specified snapshot (by its full path name)'.NL.
+    '                 (For safety reasons, this command intentionally only allows deleting snapshots;'.NL.
+    '                 use '.format_quoted('btrfs subvol delete').' to remove the original subvolume).'.NL.
+    NL.
+    $Y.'  -list-subvols  '.$X.'List all subvolumes (in the specified filesystem or the root by default)'.NL.
+    '                 which are actual read/write subvolumes containing a .snapshots subdirectory'.NL.
+    NL.
+    $Y.'  -list-snapshots'.$X.'List all subvolumes (in the specified filesystem or the root by default)'.NL.
+    '                 which are actual read/write subvolumes containing a .snapshots subdirectory'.NL.
+    NL;
+
     NL;
 
   print(STDERR $help);

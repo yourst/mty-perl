@@ -8,6 +8,6 @@
 # (See MTY/PerlModDeps/PerlModDeps.pm for documentation)
 #
 
-use MTY::PerlModDeps::PerlModDeps;
+use MTY::PerlModDeps::Main;
 
 main(@ARGV);

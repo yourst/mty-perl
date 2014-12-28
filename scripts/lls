@@ -34,6 +34,8 @@ use MTY::Display::ANSIColorREs;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;
 use MTY::Display::Table;
+use MTY::Display::Tree;
+use MTY::Display::TextInABox;
 
 use MTY::RegExp::Define;
 use MTY::RegExp::Tools;
@@ -265,10 +267,6 @@ my @perm_set_to_colors = (
 );
 
 use constant setxid_color => fg_color_rgb(255, 128, 0); # orange
-use constant { 
-  ORANGE => fg_color_rgb(255, 128, 0), 
-  rgbfgORANGE_dark_1_3 => fg_color_rgb(85, 43, 0), 
-};
 
 my @perm_field_id_to_setxid_color = (
   setxid_color.U, # O field (other) lacks setuid/setgid bits
@@ -888,7 +886,7 @@ sub format_dev_node($) {
 
   my $dark_color = 
     ($type == FILE_TYPE_BLOCK_DEV) ? R_1_3 :
-    ($type == FILE_TYPE_CHAR_DEV) ? rgbfgORANGE_dark_1_3 : W;
+    ($type == FILE_TYPE_CHAR_DEV) ? ORANGE_1_3 : W;
 
   return
     $dark_color. #.double_left_angle_bracket.$color.
@@ -1062,6 +1060,157 @@ my %command_line_options = (
   'shaded-color-coeff' => [ \$shaded_color_coeff, OPTION_VALUE_REQUIRED, [ 'shading', 'shade', 'dark', 'darkness', 'contrast' ] ],
 );
 
+my @command_line_options_help = (
+  print_banner('lls', 'Enhanced File Listings') => [ OPTION_HELP_LITERAL ], # banner...
+  'Syntax' => [ OPTION_HELP_SYNTAX ],
+  'Options' => [ OPTION_HELP_CATEGORY ],
+  '.' => '',
+  'D' => '',
+  'F' => '',
+  'H' => '',
+  'K' => '',
+  'O' => '',
+  'P' => '',
+  'S' => '',
+  'and' => '',
+  'column-headers' => '',
+  'combine-common-uid-gid' => '',
+  'comma' => '',
+  'd' => '',
+  'digits' => '',
+  'e' => '',
+  'h' => '',
+  'i' => '',
+  'in-accessible' => '',
+  'in-acl' => '',
+  'in-acls' => '',
+  'in-at' => '',
+  'in-atime' => '',
+  'in-b' => '',
+  'in-blocks' => '',
+  'in-blocksize' => '',
+  'in-bs' => '',
+  'in-capabilities' => '',
+  'in-caps' => '',
+  'in-cloned' => '',
+  'in-ct' => '',
+  'in-ctime' => '',
+  'in-d' => '',
+  'in-defacl' => '',
+  'in-defaultacl' => '',
+  'in-dev' => '',
+  'in-dev-major-minor' => '',
+  'in-devspec' => '',
+  'in-ds' => '',
+  'in-ea' => '',
+  'in-extattrs' => '',
+  'in-extents' => '',
+  'in-f' => '',
+  'in-filename' => '',
+  'in-flags' => '',
+  'in-fs' => '',
+  'in-fsf' => '',
+  'in-fsflags' => '',
+  'in-fstype' => '',
+  'in-g' => '',
+  'in-gid' => '',
+  'in-i' => '',
+  'in-inode' => '',
+  'in-l' => '',
+  'in-links' => '',
+  'in-lk' => '',
+  'in-locks' => '',
+  'in-m' => '',
+  'in-mode' => '',
+  'in-mt' => '',
+  'in-mtime' => '',
+  'in-n' => '',
+  'in-name' => '',
+  'in-nlink' => '',
+  'in-ok' => '',
+  'in-openfd' => '',
+  'in-p' => '',
+  'in-perms' => '',
+  'in-s' => '',
+  'in-size' => '',
+  'in-sl' => '',
+  'in-symlink' => '',
+  'in-t' => '',
+  'in-type' => '',
+  'in-u' => '',
+  'in-uid' => '',
+  'in-xattr' => '',
+  'in-xattrs' => '',
+  'j' => '',
+  'long' => '',
+  'not-accessible' => '',
+  'not-acl' => '',
+  'not-acls' => '',
+  'not-at' => '',
+  'not-atime' => '',
+  'not-b' => '',
+  'not-blocks' => '',
+  'not-blocksize' => '',
+  'not-bs' => '',
+  'not-capabilities' => '',
+  'not-caps' => '',
+  'not-cloned' => '',
+  'not-ct' => '',
+  'not-ctime' => '',
+  'not-d' => '',
+  'not-defacl' => '',
+  'not-defaultacl' => '',
+  'not-dev' => '',
+  'not-dev-major-minor' => '',
+  'not-devspec' => '',
+  'not-ds' => '',
+  'not-ea' => '',
+  'not-extattrs' => '',
+  'not-extents' => '',
+  'not-f' => '',
+  'not-filename' => '',
+  'not-flags' => '',
+  'not-fs' => '',
+  'not-fsf' => '',
+  'not-fsflags' => '',
+  'not-fstype' => '',
+  'not-g' => '',
+  'not-gid' => '',
+  'not-i' => '',
+  'not-inode' => '',
+  'not-l' => '',
+  'not-links' => '',
+  'not-lk' => '',
+  'not-locks' => '',
+  'not-m' => '',
+  'not-mode' => '',
+  'not-mt' => '',
+  'not-mtime' => '',
+  'not-n' => '',
+  'not-name' => '',
+  'not-nlink' => '',
+  'not-ok' => '',
+  'not-openfd' => '',
+  'not-p' => '',
+  'not-perms' => '',
+  'not-s' => '',
+  'not-size' => '',
+  'not-sl' => '',
+  'not-symlink' => '',
+  'not-t' => '',
+  'not-type' => '',
+  'not-u' => '',
+  'not-uid' => '',
+  'not-xattr' => '',
+  'not-xattrs' => '',
+  'or' => '',
+  'r' => '',
+  'shaded-color-coeff' => '',
+  'show-all' => '',
+  'sort' => '',
+  't' => '',
+);
+  
 while (my ($field, $index) = each %stat_field_name_to_index_map) {
   $command_line_options{'in-'.$field} = [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED, [ $field.'?' ], [ $index, 0 ] ];
   $command_line_options{'not-'.$field} = [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED, [ 'not-'.$field.'?' ], [ $index, 1 ] ];
@@ -1152,11 +1301,22 @@ sub numeric_sort_comparator {
   return (($negate_sort_comparison) ? -$result : $result);
 }
 
-sub lls_main {
+my $homedir = get_home_directory();
+my $cwd = getcwd();
+
+my @config_file_alternatives = (
+  '/etc/lls.conf',
+  $homedir.'/.lls', 
+);
+
+sub main(@) {
   my $groupsref;
   ($euid, $egid, $groupsref) = get_current_uid_gid_groups();
   @groups = @{$groupsref};
-  
+
+  my @config_file_args = read_options_from_config_file(@config_file_alternatives);
+  my @args = (@config_file_args, @_);
+
   #
   # Check LS_OPTIONS environment variable and add any supported options
   # to the start of the effective command line, although actual command
@@ -1164,7 +1324,7 @@ sub lls_main {
   #
   
   my ($pathargs, $invalid_option_indexes) = 
-    parse_and_check_command_line(%command_line_options);
+    parse_and_check_command_line(%command_line_options, @args, @command_line_options_help);
 
   # If no arguments were specified, use the current directory
   if (!@$pathargs) { $pathargs = [ '.' ]; }
@@ -1565,7 +1725,9 @@ sub lls_main {
     #use DDP; p @rows;
   }
 
-  print_table(STDOUT, @rows, colseps => $colseps, align => $alignments);
+  my @lines = print_table(STDOUT, @rows, colseps => $colseps, align => $alignments, return_lines => 1);
+  printfd(STDOUT, join('', @lines));
+  $output_line_counter += scalar @lines;
 
   if ($output_line_counter >= $terminal_lines) {
     # if ($print_column_headers) { print($column_headers); }
@@ -1574,6 +1736,6 @@ sub lls_main {
   }
 }
 
-lls_main(@ARGV);
+main(@ARGV);
 exit 0;
 

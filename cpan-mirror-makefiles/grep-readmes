@@ -32,10 +32,16 @@ if [[ $OUT_OF_DATE ]]; then
   fi
 fi
 
-# REGEXP="^%file\s(\N++)\n\x1C[^\x1A]*?${SEARCHFOR}[^\x1A]*+\x1A"
-REGEXP="^%file\s(\N+)\n\x1C.*?${SEARCHFOR}[^\x1A]*\x1A"
+# REGEXP='^%file\s(\N++)\n\x1C[^\x1A]*?'${SEARCHFOR}'[^\x1A]*+\x1A'
+# REGEXP='%file \s (\N++) \n \x1C [^\x1A]* '${SEARCHFOR}
+# REGEXP='%file \s (\N++) \n \x1C .*? '${SEARCHFOR}
+# REGEXP='%file \s (\N++) \n \x1C [^\x1A]*? '${SEARCHFOR}
 
-FOUND=$(perlre $PERLREOPTS -m "$REGEXP" '$1\n' < metadata/all-readmes)
+#'[^\x1A]*+\x1A'
+
+#REGEXP="^%file\s(\N+)\n\x1C.*?${SEARCHFOR}[^\x1A]*\x1A"
+
+FOUND=$(perlre -file-line-marker='^%file\s(?<file>\N+)' $PERLREOPTS -x "(${SEARCHFOR})" '$@\n' < metadata/all-readmes | sort -u)
 
 if [[ $VERBOSE ]]; then
   cd readmes

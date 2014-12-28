@@ -713,7 +713,7 @@ sub text_in_a_box($;$$$$$$$$) {
   my $first_line = $lines->[0] // $lines->[1] // '';
   my $first_line_printed_length = printed_length($first_line);
 
-  my $width_limit = get_terminal_width_in_columns() - 2;
+  my $width_limit = get_terminal_width_in_columns() - 5;
 
   if ((!defined($width)) || ($width <= 0)) {
     $width = 0;

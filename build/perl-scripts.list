@@ -20,6 +20,7 @@ nocolor
 nocolor-cond
 nocolor-if
 perl-mod-deps
+perl-mod-deps-standalone
 perlre
 perlwhich
 ppidump

@@ -62,20 +62,16 @@ include_file ?= $(eval include ${1})
 
 read_file ?= $(shell cat ${1})
 
-define __find_file_in_directory_list ?=
-$(if ${2},$(or $(realpath $(firstword ${2})/${1}),$(call __find_file_in_directory_list,${1},$(wordlist 2,$(words ${2}),${2}))))
-endef # __find_file_in_directory_list
+define find_file_in_directory_list ?=
+$(if ${2},$(or $(realpath $(firstword ${2})/${1}),$(call find_file_in_directory_list,${1},$(wordlist 2,$(words ${2}),${2}))))
+endef # find_file_in_directory_list
 
-define find_file_in_directory_list
-$(strip $(or ${pathcache_${3}[${1}]},$(eval pathcache_${3}[${1}] := $$(or $$(call __find_file_in_directory_list,${1},${2}),!))$(filter-out !,${pathcache_${3}[${1}]})))
-endef
-
-define find_file_in_directory_list_named
+define find_file_in_directory_list_named ?=
 $(call find_file_in_directory_list,${1},${${2}},${2})
 endef # find_file_in_directory_list_named
 
-define find_in_path
-$(call find_file_in_directory_list,${1},$(subst :,${SPACE},${PATH}),PATH)
+define find_in_path ?=
+$(call find_file_in_directory_list,${1},$(subst :,${SPACE},${PATH}))
 endef # find_in_path
 
 is_sym_link ?= $(filter-out $(realpath ${1}),$(abspath $(realpath $(dir ${1}))/$(notdir ${1})))
@@ -132,5 +128,49 @@ endef # summarize_paths_across_lines
 
 shell_output_lines = $(subst ${TAB},${NL},$(shell { ${1} } | tr '\n' '\t'))
 eval_shell_output_lines = $(eval $(subst ${TAB},${NL},$(shell { ${1} } | tr '\n' '\t')))
+
+# i.e. MAX_INT = (2**31) - 1
+MAX_INT := 2147483647
+
+MISSING_INCLUDE_MESSAGE = Failed to include '${1}', which does not exist and/or cannot be accessed
+
+print_indented_makefile_stack = $(info $(patsubst %,${SPACE}${SPACE},$(wordlist 2,${MAX_INT},${MAKEFILE_STACK}))${2})
+
+define __include
+ifndef included[${1}]
+  MAKEFILE := $$(call find_file_in_directory_list,${1},. $${.INCLUDE_DIRS})
+  ifneq (,$${MAKEFILE})
+    included[${1}] := $${MAKEFILE}
+    MAKEFILE_STACK := $${MAKEFILE} $${MAKEFILE_STACK}
+    $(if ${TRACE_INCLUDES},$$(call print_indented_makefile_stack,$${MAKEFILE},[include $${MAKEFILE}]))
+    include $${MAKEFILE}
+    MAKEFILE_STACK := $$(wordlist 2,${MAX_INT},$${MAKEFILE_STACK})
+  else # ${1} does not exist
+    $$(if ${TRACE_INCLUDES},$$(call print_indented_makefile_stack,$${1},<Cannot include $${1}>))
+    ifeq (,${2}) # ${2} (include_if_exists) is unset
+      $$(error $$(MISSING_INCLUDE_MESSAGE))
+    else # ${2} (include_if_exists) is set
+      # Cache negative results too (off by default so makefiles can be rebuilt):
+      # included[${1}] := <missing ${1}>
+      $$(if ${WARN_IF_MISSING_INCLUDE},$$(info $$(MISSING_INCLUDE_MESSAGE)))
+    endif # ${2} (include_if_exists) is set
+  endif # ${2} does not exist
+else # included[${1}] defined
+  $(if ${TRACE_INCLUDES},$$(call print_indented_makefile_stack,$${MAKEFILE},${SPACE}${SPACE}[already-included ${1}]))
+endif # included[${1}]
+
+MAKEFILE := $$(firstword $${MAKEFILE_STACK})
+endef # __include
+
+include = $(foreach f,${1},$(eval $(call __include,${f})))
+include_if_exists = $(foreach f,${1},$(eval $(call __include,${f},1)))
+
+MAKEFILE := $(realpath $(lastword ${MAKEFILE_LIST}))
+TOPLEVEL_MAKEFILE := ${MAKEFILE}
+included[$(lastword ${MAKEFILE_LIST})] := ${MAKEFILE}
+MAKEFILE_STACK := ${TOPLEVEL_MAKEFILE}
+$(if ${TRACE_INCLUDES},$(info [makefile $${MAKEFILE}]))
+
+BASEDIR := $(dir ${TOPLEVEL_MAKEFILE})
 
 endif # ! __FUNCTIONS_MK__

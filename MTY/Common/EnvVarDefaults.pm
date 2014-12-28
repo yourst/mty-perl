@@ -102,7 +102,7 @@ sub get_defaults_from_env(;+@) {
       next if (!defined $ref);
 
       my $type = typeof($ref);
-      if ($type == SCALAR_REF) {
+      if (is_scalar_typeid($type)) {
         ${$ref} = $value;
       } elsif ($type == ARRAY_REF) {
         @{$ref} = split(/\ ++/oax, $value);

@@ -24,6 +24,7 @@ use MTY::Filesystem::EnhancedFileStats;
 use MTY::Filesystem::PathCache;
 use MTY::Filesystem::StatsCache;
 use MTY::RegExp::FilesAndPaths;
+use MTY::Display::Colorize;
 
 #
 # search_list_of_directories_for_file($filename, @dirlist):

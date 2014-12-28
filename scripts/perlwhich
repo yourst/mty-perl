@@ -139,9 +139,71 @@ my %command_line_options = (
   'force-colorize' => [ \$force_colorize, 0, ['colorize', 'color', 'force-color' ] ],
   'quiet' => [ \$quiet, 0, ['q'] ],
   #
-  # Flags for parse_and_check_command_line() (not actually options)
+  # Flags for parse_and_check_command_line() (not actually options):
   #
-  # '.arguments_required' => 1,
+);
+
+my @command_line_options_help = (
+  'Modes of Operation' => [ OPTION_HELP_CATEGORY ],
+
+  'code' => '', 
+  'query' => '', 
+  'filename-tree' => '', 
+  'package-tree' => '', 
+  'namespace-tree' => '', 
+  'table' => '', 
+  'showpath' => '', 
+  'libdirs' => '', 
+  'cache' => '', 
+  'syscache' => '', 
+  'usercache' => '', 
+  'check' => '', 
+
+  'Details to print for matching packages' => [ OPTION_HELP_CATEGORY ],
+
+  'filename' => '', 
+  'modname' => '', 
+  'version' => '', 
+  'format' => '', 
+  'fully-qualified-names-in-tree' => '', 
+  'shorten-search-paths' => '', 
+  'force-colorize' => '', 
+
+  'Control which packages to show or skip, and where to find them' => [ OPTION_HELP_CATEGORY ],
+
+  'perlver' => '', 
+  'path' => '', 
+  'sysonly' => '', 
+  'useronly' => '', 
+  'warn' => '', 
+  'show-missing' => '', 
+  'missing-only' => '', 
+
+  'Input and output' => [ OPTION_HELP_CATEGORY ],
+
+  'stdin' => '', 
+  'quiet' => '',
+); 
+
+my @perl_config_dirs = qw(privlib archlib vendorlib vendorarch sitelib sitearch); 
+my %perl_config_dirs_to_short_names = (
+  privlib => 'perl',
+  archlib => 'perl/arch',
+  vendorlib => 'vend',
+  vendorarch => 'vend/arch',
+  sitelib => 'site',
+  sitearch => 'site/arch',
+);
+
+my @arch_prefix_tint_color = (255, 0, 0);
+
+my %short_dir_prefix_to_color = (
+  'perl' => C,
+  'perl/arch' => blend_rgb_fg(C, @arch_prefix_tint_color, 0.0),
+  'vend' => G,
+  'vend/arch' => blend_rgb_fg(G, @arch_prefix_tint_color, 0.0),
+  'site' => Y,
+  'site/arch' => blend_rgb_fg(Y, @arch_prefix_tint_color, 0.0),
 );
 
 #-----------------------------------------------------------------------------
@@ -242,29 +304,37 @@ sub format_module_package_name($;$$) {
   return $leading_namespaces_color.$leading_namespaces.$color.$final_package.$X;
 }
 
+sub get_module_prefix_short_name($) {
+  my ($path) = @_;
+  my ($dir, $basename, $suffix) = split_path($path);
+  my ($search_path, $subdir) = ($dir =~ /$search_path_list_re/oax);
+  my $short = undef;
+  if (is_there($search_path) && $shorten_search_paths) { 
+    $search_path = normalize_trailing_slash($search_path); 
+    $short = $search_path_to_short_name{$search_path};
+  }
+  return ($short, $search_path, $subdir, $basename, $suffix);
+}
+
 sub format_module_filename($;$) {
   my ($path, $colorize) = @_;
 
-  my ($dir, $basename, $suffix) = split_path($path);
+  my ($short, $search_path, $subdir, $basename, $suffix) = 
+    get_module_prefix_short_name($path);
+
   $colorize //= (defined $show_tree) ? 1 : 0;
   my $sep = $dir_sep_color.large_right_slash.$dir_component_color;
-  my ($search_path, $subdir);
 
-  ($search_path, $subdir) = ($dir =~ /$search_path_list_re/oax);
-  if (is_there($search_path) && $shorten_search_paths) { 
-    $search_path = normalize_trailing_slash($search_path); 
-    my $short = $search_path_to_short_name{$search_path};
-    if (defined $short) { 
-      $search_path = ($colorize)
-        ? double_left_angle_bracket.$short.double_right_angle_bracket.$sep 
-          : '{'.$short.'}/';
-    }
+  if (defined $short) { 
+    $search_path = ($colorize)
+      ? double_left_angle_bracket.$short.double_right_angle_bracket.$sep 
+        : '{'.$short.'}/';
   }
 
-  if ($colorize) { $dir =~ s{/}{$sep}oaxg; }
+  if ($colorize) { $subdir =~ s{/}{$sep}oaxg; }
+  my $shortened_search_path_color = scale_rgb_fg($short_dir_prefix_to_color{$short}, RATIO_1_2);
 
-  return (
-    ($colorize)
+  return (($colorize)
       ? $shortened_search_path_color.$search_path.$dir_component_color.$subdir.G.$basename.Y.$suffix
       : $search_path.$subdir.$basename.$suffix);
 }
@@ -481,30 +551,40 @@ sub build_namespace_tree() {
     }
   }
 
-# use DDP; p %containing_package_to_subpackage_count;
-
   foreach my $package (@$packages) {
+    my $filenames = $package_to_filename{$package};
+
     my ($last_package_component) = ($package =~ /$last_package_namespace_component_re/oax);
     my $subpackage_count = $containing_package_to_subpackage_count{$package} // 0;
 
-    my $name = ($print_fully_qualified_namespace_in_tree || ($subpackage_count > 0))
-      ? format_module_package_name($package, Y, Y_2_3) 
-      : $last_package_component;
+    my ($short, $search_path, $subdir, $basename, $suffix) = 
+      get_module_prefix_short_name($filenames);
 
-    my $metadata = Y.$name;
-    if ($subpackage_count > 0) { $metadata .= K.' ('.B.$subpackage_count.K.' subpackages)'; }
-    $metadata .= X.TAB;
+    my $short_dir_prefix_color = (defined $short) ? ($short_dir_prefix_to_color{$short} // R) : M;
+
+    my $symbol = ($short =~ /arch/oax) ? a_slash_s : p_in_circle;
+
+    my $package_name_color = (($subpackage_count > 0) ? U : '').$short_dir_prefix_color;
+    my $package_name_dark_color = (($subpackage_count > 0) ? U : '').scale_rgb_fg($short_dir_prefix_color, RATIO_1_2);
+
+    my $name = ($print_fully_qualified_namespace_in_tree || ($subpackage_count > 0))
+      ? format_module_package_name($package, $package_name_color, $package_name_dark_color) 
+      : $package_name_color.$last_package_component;
+
+    my @metadata = ( );
+    push @metadata, [ TREE_CMD_SYMBOL, scale_rgb_fg($short_dir_prefix_color, RATIO_2_3).$symbol.' ' ];
+    push @metadata, $name.UX;
+    if ($subpackage_count > 0) { push @metadata, K.' ('.B.$subpackage_count.K.' subpackages)'; }
+    push @metadata, X, TAB;
 
     my $version = $package_to_version{$package};
-    $metadata .= ((defined $version) ? M_3_4.'v'.M.$version : '').TAB;
-
-    my $filenames = $package_to_filename{$package};
+    push @metadata, ((defined $version) ? M_3_4.'v'.M.$version : ''), TAB;
 
     $filenames = format_module_filename($filenames, 1);
 
-    $metadata .= C.$filenames.TAB;
+    push @metadata, C.$filenames, TAB;
 
-    $path_to_metadata->{$package} = $metadata;
+    $path_to_metadata->{$package} = [ @metadata ];
   }
 
   my $tree_of_hashes = delimited_paths_to_tree_of_hashes($packages, '::', $path_to_metadata);
@@ -587,9 +667,9 @@ sub print_fields(+$) {
     # if ($show_only_missing_modules) { next; }
     
     $code = ($print_code || $has_print_code_placeholder) ? read_file($filename) : undef;
-    
+
     push @out, substitute_placeholders($print_format, %placeholder_to_var_ref);
-    
+
     if ($print_code) {
       print_perl_module_source($code);
     }
@@ -615,7 +695,7 @@ my %tree_type_to_builder_func = (
 if (!scalar @ARGV) {
   @ARGV = ('-query', '-os', '-tree');
 }
-my ($requested_modnames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV);
+my ($requested_modnames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
 
 #
 # Update @search_path_list to reflect the selected Perl version:
@@ -658,15 +738,6 @@ $search_path_list_re = qr{$search_path_list_re}oax;
 
 $shorten_search_paths //= (defined $show_tree) ? 1 : 0;
 
-my @perl_config_dirs = qw(privlib archlib vendorlib vendorarch sitelib sitearch); 
-my %perl_config_dirs_to_short_names = (
-  privlib => 'perl',
-  archlib => 'perl/arch',
-  vendorlib => 'vend',
-  vendorarch => 'vend/arch',
-  sitelib => 'site',
-  sitearch => 'site/arch',
-);
 
 %search_path_to_short_name = map { normalize_trailing_slash($Config{$_}) => $perl_config_dirs_to_short_names{$_} } @perl_config_dirs;
 

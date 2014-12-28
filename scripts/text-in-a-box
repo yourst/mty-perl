@@ -97,7 +97,7 @@ my %command_line_options = (
   'colorize' => [ sub { enable_color(); }, 0, ['enable-color', 'force-color', 'use-color' ] ],
   'nocolor' => [ sub { disable_color(); }, 0, ['disable-color', 'no-color', 'nc'] ],
   'help' => [ \$show_help, 0, 'h' ],
-  '.arguments_required' => 1,
+  META_OPTION_NON_OPTIONS_REQUIRED, 1,
 );
 
 sub format_help_tab($) {
@@ -105,7 +105,7 @@ sub format_help_tab($) {
   return NL.print_folder_tab($G.$text, G_2_3, ALIGN_LEFT).NL;
 }
 
-sub show_help($) {
+sub show_help {
   local $helpfd = open_scrollable_stream() // STDERR;
 
   print($helpfd print_banner($C.'text-in-a-box', 
@@ -233,6 +233,11 @@ sub show_help($) {
 }
 
 my ($lines, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, \&show_help);
+
+if (!scalar @$lines) {
+  show_help();
+  exit 255;
+}
 
 if (!exists $box_style_aliases{$style}) { 
   warn("Box line style $style is not defined (using 'single' instead)");

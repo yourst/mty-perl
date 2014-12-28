@@ -1,0 +1,161 @@
+#!/usr/bin/perl -w
+
+use v5.16; use warnings;
+
+use constant { NL => "\n" };
+
+use CPAN::Meta;
+use Module::Load;
+use Module::CoreList;
+
+my $filename_in_path_re = qr{([^/]+) \Z}oamsx;
+our $perl_package_name_re = qr{(?> [A-Za-z\_] \w*+ (?> \:\: \w++)*+)}oamsx;
+
+sub read_directory($) {
+  my ($dir) = @_;
+  
+  opendir(my $fd, $dir) || die("Cannot open '$dir' directory");
+  my @filenames = readdir($fd);
+  closedir($fd);
+  return @filenames;
+}
+
+my @filenames = ( );
+
+foreach my $arg (@ARGV) {
+  push @filenames, ((-d $arg) ? (map { $arg.'/'.$_ } read_directory($arg)) : $arg);
+}
+
+sub get_all_requirements(+;$) {
+  my ($meta) = @_;
+  my $reqs_by_phase = $meta->effective_prereqs()->as_string_hash();
+
+  my $final_reqs = { };
+  
+  foreach my $reqs_for_phase (values %$reqs_by_phase) {
+    while (my ($module, $version) = each %{$reqs_for_phase->{requires}}) {
+      $final_reqs->{$module} = $version;
+    }
+  }
+
+  return $final_reqs;
+}
+
+my @packages = sort grep { /\A $perl_package_name_re \Z/oamsx } read_directory('packages/');
+
+my %package_to_dist = ( );
+
+my $links_queried = 0;
+my $total_links = scalar @packages;
+
+foreach my $package (@packages) {
+  my $link = readlink('packages/'.$package);
+  if (!defined $link) { die("Cannot read symlink 'packages/$package'"); }
+
+  my ($dist) = ($link =~ $filename_in_path_re);
+  $package_to_dist{$package} = $dist;
+
+  $links_queried++;
+  if (($links_queried & 0x3ff) == 0) 
+    { print(STDERR "\rFound distribution for $links_queried of $total_links CPAN packages"); }
+}
+
+print(STDERR "\nFound $total_links total CPAN packages\n");
+
+my @core_modules = Module::CoreList->find_modules(qr{}oax);
+
+$package_to_dist{'perl'} = 'perl';
+
+foreach my $package (@core_modules) 
+  { $package_to_dist{$package} = 'perl'; }
+
+my %dists_to_req_dists = ( );
+
+my $dists_queried = 0;
+my $total_dists = scalar @filenames;
+
+foreach my $filename (@filenames) {
+  my $meta;
+
+  eval { $meta = CPAN::Meta->load_file($filename, {lazy_validation => 1}); };
+
+  $dists_queried++;
+  if (($dists_queried & 0x3ff) == 0) 
+    { print(STDERR "\rQueried metadata for $dists_queried of $total_dists CPAN distributions"); }
+
+  if (!defined $meta) {
+    print(STDERR "Warning: failed to parse metadata file $filename; skipping\n");
+    my ($distname) = ($filename =~ $filename_in_path_re);
+    if (defined $distname) { $dists_to_req_dists{$distname} = undef; }
+    next;
+  }
+
+  my $distname = $meta->name;
+
+  my $required_modules_and_versions = get_all_requirements($meta);
+  my @required_modules = sort keys %$required_modules_and_versions;
+
+  my $provided_modules_info = $meta->provides;
+  my @provided_modules = (defined $provided_modules_info) ? sort keys %$provided_modules_info : ( );
+
+  my $required_dists = { };
+
+  foreach my $module (@required_modules) {
+    my $required_dist = $package_to_dist{$module};
+
+    if (!defined $required_dist) {
+      print(STDERR 'Warning: distribution '.$distname.' required module '.$module.' in unknown distribution'.NL);
+      $required_dist = '['.($module =~ s{::}{/}roamsxg).']';
+    }
+
+    # don't include core modules distributed with perl:
+    next if ($required_dist eq 'perl');
+
+    push @{$required_dists->{$required_dist}}, $module;
+  }
+
+  my @required_dists = sort keys %$required_dists;
+
+  $dists_to_req_dists{$distname} = (scalar @required_dists) ? [ @required_dists ] : undef;
+}
+
+print(STDERR "\nFound $total_dists total CPAN distributions\n");
+
+sub find_recursive_deps {
+  my ($expanded_deps, $dists) = @_;
+
+  $expanded_deps //= { };
+
+  foreach my $dist (@$dists) {
+    next if (exists $expanded_deps->{$dist});
+    $expanded_deps->{$dist} = 1;
+
+    my $reqs = $dists_to_req_dists{$dist};
+    if (defined $reqs) { find_recursive_deps($expanded_deps, $reqs); }
+  }
+
+  return $expanded_deps;
+}
+
+foreach my $dist (sort keys %dists_to_req_dists) {
+  my $req_dists = $dists_to_req_dists{$dist};
+  print('deps['.$dist.'] := '.join(' ', @{$req_dists // [ ]}).NL);
+}
+
+my $find_recursive_deps = 0;
+
+if ($find_recursive_deps) {
+  foreach my $dist (sort keys %dists_to_req_dists) {
+    my $req_dists = $dists_to_req_dists{$dist};
+    my @expanded_deps_list = ( );
+    if (defined $req_dists) {
+      my %expanded_deps_hash = ( );
+      find_recursive_deps(\%expanded_deps_hash, $req_dists);
+      @expanded_deps_list = sort keys %expanded_deps_hash;
+    }
+    
+    open(my $fd, '>', 'deps/'.$dist) || die("Cannot open deps/$dist");
+    print($fd 'redeps['.$dist.'] := '.join(' ', @expanded_deps_list).NL);
+    close($fd);
+  }
+}
