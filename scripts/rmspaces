@@ -57,24 +57,24 @@ foreach my $arg (@ARGV) {
 die("rmspaces: missing argument to -sep <X> option\n") unless (defined($separators));
 die("rmspaces: missing argument to -match <X> option\n") unless (defined($spaces));
 
-#print("spaces = [$spaces], separators = [$separators], recursive = $recursive\n");
+#prints("spaces = [$spaces], separators = [$separators], recursive = $recursive\n");
 
 #$separatorqm = quotemeta($separator);
 #$spaces_re = qr/\s+/oams;
 #$dup_separator_re = qr/(?:$separatorqm)(?:$separatorqm)+/oams;
 
 if ($verbose) {
-  print("rmspaces: Matching spaces:           [$spaces]\n");
-  print("rmspaces: Replacing with separators: [$separators]\n");
-  print("rmspaces: Currently in directory ".getcwd()."\n");
-  print("rmspaces: Doing dry run only: no renames will actually be performed\n") if ($dryrun);
-  print("rmspaces: ".($recursive ? "recursively " : "").
+  prints("rmspaces: Matching spaces:           [$spaces]\n");
+  prints("rmspaces: Replacing with separators: [$separators]\n");
+  prints("rmspaces: Currently in directory ".getcwd()."\n");
+  prints("rmspaces: Doing dry run only: no renames will actually be performed\n") if ($dryrun);
+  prints("rmspaces: ".($recursive ? "recursively " : "").
         "processing ".scalar(@dirlist)." directories and ".
         scalar(@filelist)." files:\n");
 
-  foreach my $d (@dirlist)  { print("  ".($recursive ? '>' : ' ')."DIR  $d\n"); }
-  foreach my $f (@filelist) { print("  file  $f\n"); }
-  print("\n");
+  foreach my $d (@dirlist)  { prints("  ".($recursive ? '>' : ' ')."DIR  $d\n"); }
+  foreach my $f (@filelist) { prints("  file  $f\n"); }
+  prints("\n");
 }
 
 foreach my $f (@filelist) { check_and_rename($f); }
@@ -101,10 +101,10 @@ sub check_and_rename {
 
   if ($newname ne $name) {
     if (-e "$newname") {
-      print(STDERR "rmspaces: Warning: cannot rename $name => $newname: destination already exists!\n");
+      printfd(STDERR, "rmspaces: Warning: cannot rename $name => $newname: destination already exists!\n");
       return 0;
     }
-    print("$name => $newname\n");
+    prints("$name => $newname\n");
     return 1 if ($dryrun);
     rename($name, $newname) || die("rmspaces: ERROR: cannot rename $name => $newname (errno $!)\n");
     return 1;

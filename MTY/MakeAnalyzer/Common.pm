@@ -77,7 +77,7 @@ noexport:; sub replace_file_path_with_formatted_file_path($) {
 sub format_file_paths_within_string($) {
   my ($s) = @_;
 
-  #print(STDERR '[format_file_paths_within_string ['.$s.'] ]'.NL);
+  #prints(STDERR '[format_file_paths_within_string ['.$s.'] ]'.NL);
   $s =~ s{$filesystem_path_including_directory_re}{replace_file_path_with_formatted_file_path($1)}oamsxge;
   return $s;
 }
@@ -142,15 +142,15 @@ sub prepare_path_prefixes_to_replacements(+) {
   my $DEBUG = 1;
   if ($DEBUG) {
     my $longest_key = maxlength(keys %$mapping);
-    print(STDERR NL.$G.$U.'Mapping of path prefixes to replacements:'.$X.NL.NL);
+    printfd(STDERR, NL.$G.$U.'Mapping of path prefixes to replacements:'.$X.NL.NL);
 
     foreach my $key (keys %$mapping) {
       my $repl = $path_prefixes_to_replacements->{$key};
-      print(STDERR $Y.padstring($key, $longest_key).$K.' => '.$G.$repl.$X.NL);
+      printfd(STDERR, $Y.padstring($key, $longest_key).$K.' => '.$G.$repl.$X.NL);
       my $k = $key;
       die if ($k !~ /$path_prefixes_re/oax);
     }
-    print(STDERR NL);
+    printfd(STDERR, NL);
   }
 
   return $path_prefixes_re;
@@ -257,20 +257,20 @@ sub print_summary_of_categories(+$;$) {
   my $c1 = ($is_for_targets) ? $R : $B;
   my $c2 = ($is_for_targets) ? $Y : $C;
 
-  print($fd NL.NL.text_in_a_box(
+  printfd($fd, NL.NL.text_in_a_box(
     $c2.' '.dot_in_circle.' '.$c2.
       expand_with_spacers(uc($targets_or_variables), ' '.$dark_gold_color.star.' '.$c2.' ').
         $c2.' '.dot_in_circle.' '.$X, 0, $c1, 'rounded', undef, 20, 60).NL.NL);
 
   return if (!defined $categories);
 
-  print($fd $Y.$U.'Summary of categories for '.$targets_or_variables.':'.$X.NL.NL);
+  printfd($fd, $Y.$U.'Summary of categories for '.$targets_or_variables.':'.$X.NL.NL);
   foreach my $category (sort keys %{$categories}) {
     my $tgtlist = $categories->{$category};
-    print($fd $K.' '.dot.' '.$Y.padstring($category, 30).
+    printfd($fd, $K.' '.dot.' '.$Y.padstring($category, 30).
             ' '.$B.'('.scalar(@$tgtlist).')'.$X.NL); 
   }
-  print($fd NL.NL);
+  printfd($fd, NL.NL);
 }
 
 sub print_summary_of_make_database(++;++$) {

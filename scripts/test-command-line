@@ -17,8 +17,6 @@ use MTY::Display::PrintableSymbolTools;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::DataStructures;
 use MTY::Common::CommandLine;
-use Data::Dumper;
-use Data::Printer;
 
 # Modes of operation:
 my $bool_option_1 = 0;
@@ -42,11 +40,11 @@ my $comb_z = 0;
 my @nosep1 = ( );
 
 my %command_line_options = (
-  'bool1' => [ \$bool_option_1, 0, ['b1', 'b1alt'] ],
+  'bool1' => [ \$bool_option_1, 0, [qw(b1 b1alt)] ],
   'bool2' => [ \$bool_option_2, OPTION_TOGGLE_BOOL, 'b2' ],
   'bool3' => \$bool_option_3,
   'option4' => [ \$option_4, 'o4', ],
-  'option5' => [ \$option_5, [ 'o5', 'op5' ] ],
+  'option5' => [ \$option_5, [qw(o5 op5)] ],
   'req4' => [ \$required_scalar_4, OPTION_VALUE_REQUIRED, 'r4', 99999, 11111 ],
   'req5' => [ \$required_scalar_5, OPTION_VALUE_REQUIRED | OPTION_APPEND_REPEATS ],
   'opt6' => [ \$optional_scalar_6, OPTION_VALUE_OPTIONAL, 'o6' ],
@@ -56,13 +54,13 @@ my %command_line_options = (
   'reqlist10' => [ \@required_list_10, OPTION_VALUE_REQUIRED ],
   'hash11'   => [ \%hash_11, OPTION_VALUE_REQUIRED, 'h11' ],
   'reqsub12' => [ sub {
-                     print(STDERR 'Handler for reqsub12 called: args = ('.join(', ', @_).')'.NL);
+                     printfd(STDERR, 'Handler for reqsub12 called: args = ('.join(', ', @_).')'.NL);
                      $required_sub_12 = '<value='.$_[0].'>';
                    }, OPTION_VALUE_REQUIRED, 'rs12' ],
   'comb-w' => [ \$comb_w, OPTION_SINGLE_CHAR_COMBINABLE, 'w' ],
-  'comb-x' => [ \$comb_x, OPTION_SINGLE_CHAR_COMBINABLE, [ 'xopt', 'x' ] ],
-  'comb-y' => [ \$comb_y, OPTION_SINGLE_CHAR_COMBINABLE, [ 'y', 'why' ] ],
-  'comb-z' => [ \$comb_z, OPTION_SINGLE_CHAR_COMBINABLE, [ 'zorro', 'z' ] ],
+  'comb-x' => [ \$comb_x, OPTION_SINGLE_CHAR_COMBINABLE, [qw(xopt x)] ],
+  'comb-y' => [ \$comb_y, OPTION_SINGLE_CHAR_COMBINABLE, [qw(y why)] ],
+  'comb-z' => [ \$comb_z, OPTION_SINGLE_CHAR_COMBINABLE, [qw(zorro z)] ],
   'nosep1' => [ \@nosep1, OPTION_NO_SEPARATOR_BEFORE_VALUE | OPTION_VALUE_REQUIRED | OPTION_APPEND_REPEATS, [ 'I' ] ],
 );
 
@@ -78,7 +76,7 @@ my @args = split(/\s+/, $argstring);
 
 print_var('args', @args);
 #print_var('command_line_options', %command_line_options);
-#print(STDOUT p(%command_line_options));
+#prints(STDOUT p(%command_line_options));
 
 my ($filenames, $invalid_arg_indexes, $option_names_to_values) = 
   parse_and_check_command_line(%command_line_options, @args);
@@ -86,7 +84,7 @@ my ($filenames, $invalid_arg_indexes, $option_names_to_values) =
 print_var('filenames', @$filenames);
 #print_var('invalid_arg_indexes', [ keys %$invalid_arg_indexes ]);
 #foreach $i (sort keys %$invalid_arg_indexes) {
-#  print($K.' '.dot.' '.$R.$U.'Invalid (#'.$i.'):'.$UX.$Y.' '.$args[$i].$X.NL);
+#  prints($K.' '.dot.' '.$R.$U.'Invalid (#'.$i.'):'.$UX.$Y.' '.$args[$i].$X.NL);
 #}
 
 print_var('bool_option_1', $bool_option_1);

@@ -232,14 +232,18 @@ sub get_enhanced_file_stats($;$+$$+$) {
 
       $base_dir_stats = get_file_stats($path_for_base_dir_stats_query, $base_dir_fd);
     }
-    
-    if (($base_dir_stats->[STAT_DEV] == $stats->[STAT_DEV]) && ($name ne '/'))
+
+    my $may_be_mount_point = 
+      ($base_dir_stats->[STAT_DEV] != $stats->[STAT_DEV]) || # for mount points within the directory we're listing
+      ($base_dir_stats->[STAT_INODE] == $stats->[STAT_INODE]); # for the '.' directory link itself, but only if it's a mount point
+
+    if (!$may_be_mount_point) 
       { $stats->[STAT_TYPE] = FILE_TYPE_DIR; return $stats; }
   
     # default of empty '{ }' in case /proc/mounts was 
     # unavailable or the caller did not ask for mounts:
     my $all_mounts = query_mounted_filesystems() // { };
-  
+    
     #
     # We really need to have the entire absolute path name at this point.
     # If we are doing this relative to $base_dir_fd, it is OK if we just
@@ -247,17 +251,12 @@ sub get_enhanced_file_stats($;$+$$+$) {
     # the real path with all symlinks resolved of the base directory
     # in which the specified file resides:
     #
+
+    my $mountpoint = find_mount_point($fullpath);
+    if (!defined $mountpoint) { die("Cannot find filesystem containing '$fullpath'"); }
   
-    my $mountpoint = undef;
-    my $mountinfo = $all_mounts->{$fullpath};
-    
-    if (!defined $mountinfo) {
-      # It must be a subvolume of a mounted filesystem closer to the root:
-      $mountpoint = find_mount_point($fullpath);
-      if (!defined $mountpoint) { die("Cannot find filesystem containing '$fullpath'"); }
-      $mountinfo = $all_mounts->{$mountpoint};
-      if (!defined $mountinfo) { die("No mount information found for mount point '$mountpoint'"); }    
-    }
+    my $mountinfo = $all_mounts->{$mountpoint};
+    if (!defined $mountinfo) { die("No mount information found for mount point '$mountpoint'"); }    
 
     # Get the filesystem type name:
     $stats->[STAT_FSTYPE] = $mountinfo->[MOUNTINFO_TYPE];
@@ -266,15 +265,18 @@ sub get_enhanced_file_stats($;$+$$+$) {
     # with one of the types FILE_TYPE_{BLOCK_DEV, BIND, VOLATILE, SPECIAL,
     # NETWORK or FUSE}_MOUNT:
 
-    $stats->[STAT_TYPE] = $mountinfo->[MOUNTINFO_CATEGORY];
-    
-    if (($stats->[STAT_FSTYPE] eq 'btrfs') && 
-          is_btrfs_subvol_or_root($fullpath, $stats)) {
-      $stats->[STAT_TYPE] = (is_subvol_writable($fullpath) 
-                               ? FILE_TYPE_SUBVOLUME :
-                                 FILE_TYPE_SNAPSHOT);
-    }
+    my $type = (($stats->[STAT_FSTYPE] eq 'btrfs') && is_btrfs_subvol_or_root($fullpath, $stats)) ?
+      (is_subvol_writable($fullpath) ? FILE_TYPE_SUBVOLUME : FILE_TYPE_SNAPSHOT) :
+      ($mountpoint eq $fullpath) ? $mountinfo->[MOUNTINFO_CATEGORY] :
+      FILE_TYPE_DIR;
+
+    $stats->[STAT_TYPE] = $type;
   } else { # (!STATS_QUERY_MOUNTS)
+    #
+    # Still handle the trivial case of the root directory even if the user
+    # didn't want us to spend time querying /proc/mounts and the associated
+    # per-directory details above:
+    #
     if ($name eq '/') { $stats->[STAT_TYPE] = FILE_TYPE_MOUNT_POINT; }
   }
 

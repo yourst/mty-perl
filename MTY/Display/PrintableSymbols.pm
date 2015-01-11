@@ -157,6 +157,7 @@ BEGIN {
   pointed_asterisk => chr(0xff0a), # six pointed asterisk with lines (not rounded lobes)
   eight_point_asterisk => chr(0x274b), # eight pointed (actually rounded lobes) asterisk
   double_colon => chr(0x2836), # '::' in one character
+  light_double_colon => chr(0x589).chr(0x589),
   
   star_with_8_points => chr(0x2734), # eight pointed star with deep points
   star_with_6_points => chr(0x2736), # eight pointed star with deep points

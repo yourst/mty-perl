@@ -58,6 +58,7 @@ my $long_format = 1;
 my $show_all = 1;
 my $follow_symlinks_on_command_line = 0;
 my $follow_symlinks_to_dirs_on_command_line = 0;
+my $stat_symlink_target = 0;
 my $print_column_headers = 0;
 my $combine_common_uid_gid = 1;
 my $max_file_size_decimal_digits = 7;
@@ -348,6 +349,7 @@ my $same_uid_gid_color = scale_rgb_fg($different_uid_gid_color, $shaded_color_co
 my $unknown_uid_gid_color = fg_color_rgb(255, 64, 128);
 
 my $xattr_symbol = fg_color_rgb(255, 80, 180).chr(0x212f).chr(0x03b1); # stylized "ea" 
+my $acl_or_caps_symbol = fg_color_rgb(255, 160, 64).a_slash_c;
 
 my $symlink_type_color = fg_color_rgb(224, 128, 192);
 my $symlink_type_shaded_color = scale_rgb_fg($symlink_type_color, 0.667);
@@ -424,8 +426,8 @@ sub format_stat_mode_permissions($;$$$$$) {
       if (starts_with($xattr, 'user.')) { $user_xattr_count++; } else { $system_xattr_count++; }
     }
 
-    $perms_column .= ((defined $access_acl || defined $default_acl || defined $capabilities)) ? fg_color_rgb(255, 160, 64).a_slash_c : ' ';
-    $perms_column .= ' '.(($user_xattr_count > 0) ? $M.$xattr_symbol : '  ').'  ';
+    $perms_column .= ((defined $access_acl || defined $default_acl || defined $capabilities)) ? $acl_or_caps_symbol : ' ';
+    $perms_column .= ' '.(($user_xattr_count > 0) ? $xattr_symbol : '  ').'  ';
   } else { # format symlink category in place of unused permissions
     my $dir = directory_of($stats->[STAT_PATH]);
     my $symlink_target_exists = 0;
@@ -802,7 +804,7 @@ sub format_filename($$$) {
     my $printed_symlink;
 
     if (defined $symlink) {
-      my $target_filename = filename_of($symlink);
+      my $target_filename = last_path_component_of($symlink);
       my $target_abs_path = resolve_path($symlink, $dirfd, 0);
       my $target_exists = (defined $target_abs_path) ? 1 : 0;
       my $target_dir = ($target_exists) ? strip_last_path_component($target_abs_path) : undef;
@@ -1007,10 +1009,10 @@ sub set_field_search_pattern {
   my ($value, $field, $arg, $argindex, $fieldid, $is_not) = @_;
 
   # while (my ($k, $v) = each %search_fields_for_patterns_option) { ... }
-  # print("value $value, field $field, arg $arg, argindex $argindex, fieldid ".($fieldid // '?').", is_not ".($is_not // '?').NL);
+  # prints("value $value, field $field, arg $arg, argindex $argindex, fieldid ".($fieldid // '?').", is_not ".($is_not // '?').NL);
 
   my $re = qr{$value}oa;
-  # print("Set field $fieldid to $re\n");
+  # prints("Set field $fieldid to $re\n");
   $field_to_search_regexp[$fieldid] = qr{$value}oa;
 }
 
@@ -1034,183 +1036,87 @@ sub set_field_search_pattern {
 my %command_line_options = (
   'long' => [ \$long_format, OPTION_SINGLE_CHAR_COMBINABLE, 'l' ],
   'show-all' => [ \$show_all, OPTION_SINGLE_CHAR_COMBINABLE, 'a' ],
-  'sort' => [ \$sort_field, OPTION_VALUE_REQUIRED, [ ], \%stat_field_name_to_index_map ],
-  'S' => [ \$sort_field, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ ], STAT_SIZE ],
-  't' => [ \$sort_field, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ ], STAT_MTIME_NS ],
-  'r' => [ \$sort_reverse, OPTION_SINGLE_CHAR_COMBINABLE, ['reverse', 'ascending'] ],
-  'h' => [ \$human_readable_sizes, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 'human-readable' ] ],
-  'digits' => [ \$max_file_size_decimal_digits, OPTION_VALUE_REQUIRED, [ 'size-digits', 'file-size-digits' ] ],
+  'sort' => [ \$sort_field, OPTION_VALUE_REQUIRED, [ ], \%stat_field_name_to_index_map, \%stat_field_index_to_name_map ],
+  'sort-by-size' => [ \$sort_field, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 'S' ], STAT_SIZE ],
+  'sort-by-time' => [ \$sort_field, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 't' ], STAT_MTIME_NS ],
+  'reverse' => [ \$sort_reverse, OPTION_SINGLE_CHAR_COMBINABLE, [qw(r ascending)] ],
+  'human-readable' => [ \$human_readable_sizes, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 'h' ] ],
+  'digits' => [ \$max_file_size_decimal_digits, OPTION_VALUE_REQUIRED, [qw(size-digits file-size-digits)] ],
   'comma' => [ \$comma_separated_digits, OPTION_ASSIGN_BOOL, [ 'comma-sep-sizes' ] ],
-  'd' => [ \$show_directory_itself, OPTION_SINGLE_CHAR_COMBINABLE, [ 'directory-itself', 'dir-itself', ] ],
-  'H' => [ \$follow_symlinks_on_command_line, OPTION_SINGLE_CHAR_COMBINABLE, [ 'follow-cmdline', 'follow-args', ] ],
-  'D' => [ \$only_show_directories, OPTION_SINGLE_CHAR_COMBINABLE, [ 'only-dirs', 'only-show-dirs', 'only-directories' ] ],
-  'F' => [ \$only_show_files, OPTION_SINGLE_CHAR_COMBINABLE, [ 'only-files', 'only-show-files' ] ],
-  'K' => [ \$only_show_symlinks, OPTION_SINGLE_CHAR_COMBINABLE, [ 'only-links', 'only-show-links', 'only-symlinks', 'only-show-symlinks' ] ],
-  'i' => [ \$show_inodes, OPTION_SINGLE_CHAR_COMBINABLE, [ 'inodes', 'inode', 'ino' ] ],
-  'P' => [ \$show_acls, OPTION_SINGLE_CHAR_COMBINABLE, [ 'acls', 'acl' ] ], 
-  'e' => [ \$show_xattrs, OPTION_SINGLE_CHAR_COMBINABLE, [ 'xattrs', 'xattr', 'eas', 'extattrs' ] ],
-  'j' => [ \$show_extents, OPTION_SINGLE_CHAR_COMBINABLE, [ 'extents', 'cloned', 'cloned-extents', 'copy-on-write', 'cow', 'btrfs', 'sparse' ] ],
-  'O' => [ \$show_open_files, OPTION_SINGLE_CHAR_COMBINABLE, [ 'open-files', 'openfd', 'openfds', 'open', 'opened', 'lsof', 'fuser' ] ],
-  'column-headers' => [ \$print_column_headers, OPTION_TOGGLE_BOOL, ['colhdrs', 'column-headers'] ],
-  'combine-common-uid-gid' => [ \$combine_common_uid_gid, OPTION_TOGGLE_BOOL, ['cug', 'comxid'] ],
-  '.' => [ \$show_dot_and_dot_dot, OPTION_TOGGLE_BOOL, [ 'show-.-and-..', '.-..', '.-and-..', 'dot-and-dot-dot', 'cwd-and-parent'] ],
-# 'search' => [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED|OPTION_COMMA_SEP_LISTS|OPTION_APPEND_REPEATS, [ 'grep', 'find' ] ],
-  'and' => [ \&match_all_patterns, 0 ],
-  'or' => [ \&match_any_patterns, 0 ],
-  'shaded-color-coeff' => [ \$shaded_color_coeff, OPTION_VALUE_REQUIRED, [ 'shading', 'shade', 'dark', 'darkness', 'contrast' ] ],
+  'dir-itself' => [ \$show_directory_itself, OPTION_SINGLE_CHAR_COMBINABLE, [qw(d directory-itself)] ],
+  'follow-cmdline' => [ \$follow_symlinks_on_command_line, OPTION_SINGLE_CHAR_COMBINABLE, [qw(H follow-args)] ],
+  'follow' => [ \$stat_symlink_target, OPTION_SINGLE_CHAR_COMBINABLE, [qw(L follow-symlinks follow-links symlink-target)] ],
+  'only-dirs' => [ \$only_show_directories, OPTION_SINGLE_CHAR_COMBINABLE, [qw(D only-show-dirs only-directories)] ],
+  'only-files' => [ \$only_show_files, OPTION_SINGLE_CHAR_COMBINABLE, [qw(F only-show-files)] ],
+  'only-links' => [ \$only_show_symlinks, OPTION_SINGLE_CHAR_COMBINABLE, [qw(K only-symlinks only-show-links only-symlinks only-show-symlinks)] ],
+  'inodes' => [ \$show_inodes, OPTION_SINGLE_CHAR_COMBINABLE, [qw(i inode ino)] ],
+  'acls' => [ \$show_acls, OPTION_SINGLE_CHAR_COMBINABLE, [qw(P acl)] ], 
+  'xattrs' => [ \$show_xattrs, OPTION_SINGLE_CHAR_COMBINABLE, [qw(e xattr eas extattrs)] ],
+  'extents' => [ \$show_extents, OPTION_SINGLE_CHAR_COMBINABLE, [qw(j cloned cloned-extents copy-on-write cow btrfs sparse)] ],
+  'opened' => [ \$show_open_files, OPTION_SINGLE_CHAR_COMBINABLE, [qw(O open-files openfd openfds open lsof fuser)] ],
+  'column-headers' => [ \$print_column_headers, OPTION_TOGGLE_BOOL, [qw(colhdrs column-headers)] ],
+  'combine-uid-gid' => [ \$combine_common_uid_gid, OPTION_TOGGLE_BOOL, [ 'comxid' ] ],
+  'dir-and-parent' => [ \$show_dot_and_dot_dot, OPTION_TOGGLE_BOOL, [qw(. show-.-and-.. .-.. .-and-.. dot-and-dot-dot)] ],
+# 'search' => [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED|OPTION_COMMA_SEP_LISTS|OPTION_APPEND_REPEATS, [qw(grep find)] ],
+  'and' => [ \&match_all_patterns, 0, [ '&' ] ],
+  'or' => [ \&match_any_patterns, 0, [ '|' ] ],
+  'shaded-color-coeff' => [ \$shaded_color_coeff, OPTION_VALUE_REQUIRED, [qw(shading shade dark darkness contrast)] ],
 );
 
 my @command_line_options_help = (
-  print_banner('lls', 'Enhanced File Listings') => [ OPTION_HELP_LITERAL ], # banner...
-  'Syntax' => [ OPTION_HELP_SYNTAX ],
-  'Options' => [ OPTION_HELP_CATEGORY ],
-  '.' => '',
-  'D' => '',
-  'F' => '',
-  'H' => '',
-  'K' => '',
-  'O' => '',
-  'P' => '',
-  'S' => '',
-  'and' => '',
-  'column-headers' => '',
-  'combine-common-uid-gid' => '',
-  'comma' => '',
-  'd' => '',
-  'digits' => '',
-  'e' => '',
-  'h' => '',
-  'i' => '',
-  'in-accessible' => '',
-  'in-acl' => '',
-  'in-acls' => '',
-  'in-at' => '',
-  'in-atime' => '',
-  'in-b' => '',
-  'in-blocks' => '',
-  'in-blocksize' => '',
-  'in-bs' => '',
-  'in-capabilities' => '',
-  'in-caps' => '',
-  'in-cloned' => '',
-  'in-ct' => '',
-  'in-ctime' => '',
-  'in-d' => '',
-  'in-defacl' => '',
-  'in-defaultacl' => '',
-  'in-dev' => '',
-  'in-dev-major-minor' => '',
-  'in-devspec' => '',
-  'in-ds' => '',
-  'in-ea' => '',
-  'in-extattrs' => '',
-  'in-extents' => '',
-  'in-f' => '',
-  'in-filename' => '',
-  'in-flags' => '',
-  'in-fs' => '',
-  'in-fsf' => '',
-  'in-fsflags' => '',
-  'in-fstype' => '',
-  'in-g' => '',
-  'in-gid' => '',
-  'in-i' => '',
-  'in-inode' => '',
-  'in-l' => '',
-  'in-links' => '',
-  'in-lk' => '',
-  'in-locks' => '',
-  'in-m' => '',
-  'in-mode' => '',
-  'in-mt' => '',
-  'in-mtime' => '',
-  'in-n' => '',
-  'in-name' => '',
-  'in-nlink' => '',
-  'in-ok' => '',
-  'in-openfd' => '',
-  'in-p' => '',
-  'in-perms' => '',
-  'in-s' => '',
-  'in-size' => '',
-  'in-sl' => '',
-  'in-symlink' => '',
-  'in-t' => '',
-  'in-type' => '',
-  'in-u' => '',
-  'in-uid' => '',
-  'in-xattr' => '',
-  'in-xattrs' => '',
-  'j' => '',
-  'long' => '',
-  'not-accessible' => '',
-  'not-acl' => '',
-  'not-acls' => '',
-  'not-at' => '',
-  'not-atime' => '',
-  'not-b' => '',
-  'not-blocks' => '',
-  'not-blocksize' => '',
-  'not-bs' => '',
-  'not-capabilities' => '',
-  'not-caps' => '',
-  'not-cloned' => '',
-  'not-ct' => '',
-  'not-ctime' => '',
-  'not-d' => '',
-  'not-defacl' => '',
-  'not-defaultacl' => '',
-  'not-dev' => '',
-  'not-dev-major-minor' => '',
-  'not-devspec' => '',
-  'not-ds' => '',
-  'not-ea' => '',
-  'not-extattrs' => '',
-  'not-extents' => '',
-  'not-f' => '',
-  'not-filename' => '',
-  'not-flags' => '',
-  'not-fs' => '',
-  'not-fsf' => '',
-  'not-fsflags' => '',
-  'not-fstype' => '',
-  'not-g' => '',
-  'not-gid' => '',
-  'not-i' => '',
-  'not-inode' => '',
-  'not-l' => '',
-  'not-links' => '',
-  'not-lk' => '',
-  'not-locks' => '',
-  'not-m' => '',
-  'not-mode' => '',
-  'not-mt' => '',
-  'not-mtime' => '',
-  'not-n' => '',
-  'not-name' => '',
-  'not-nlink' => '',
-  'not-ok' => '',
-  'not-openfd' => '',
-  'not-p' => '',
-  'not-perms' => '',
-  'not-s' => '',
-  'not-size' => '',
-  'not-sl' => '',
-  'not-symlink' => '',
-  'not-t' => '',
-  'not-type' => '',
-  'not-u' => '',
-  'not-uid' => '',
-  'not-xattr' => '',
-  'not-xattrs' => '',
-  'or' => '',
-  'r' => '',
-  'shaded-color-coeff' => '',
-  'show-all' => '',
-  'sort' => '',
-  't' => '',
+  [ OPTION_HELP_LITERAL ] => print_banner('lls', 'Enhanced File Listings'),
+
+  [ OPTION_HELP_SYNTAX ] => undef,
+
+  [ OPTION_HELP_CATEGORY, fg_color_rgb(255, 128, 64) ], fg_color_rgb(255, 128, 64).'Selection and filtering of items to be listed',
+
+  'show-all' => 'Show all files, including dot files (.<filename>), hidden files, etc.',
+  'only-files' => 'Show only files (without directories, symlinks or other item types)',
+  'only-dirs' => 'Show only directories, subvolumes and mount points',
+  'only-links' => 'Show only symbolic links',
+  'dir-itself' => 'For each directory on the command line, show the fields about the directory itself (i.e. one line per directory), rather than listing all files within each directory',
+  'dir-and-parent' => 'Show the '.format_quoted(".").' and '.format_quoted("..").' hard links for each directory, indicating the absolute path of the containing parent directory and the directory itself',
+
+  [ OPTION_HELP_CATEGORY, SKYBLUE_1_2 ] => SKYBLUE.'Sorting',
+
+  'sort' => 'Sort by the specified field name(s), first by the first field, then for files with the same value in that field, sort by the second field, and so on',
+  'sort-by-size' => 'Sort by size (equivalent to '.G.'-sort size'.X.')',
+  'sort-by-time' => 'Sort by modification timestamp (equivalent to '.G.'-sort mtime'.X.')',
+  'reverse' => 'Reverse sort order, making it ascending rather than descending',
+
+  [ OPTION_HELP_CATEGORY, C_1_2 ] => C.'Extended details to optionally query and display',
+
+  'long' => 'Long listing format (always enabled; only for compatibility with GNU ls)',
+  'inodes' => 'Show inode numbers and the mounted device IDs on which they reside',
+  'acls' => 'Show the symbol '.format_quoted($acl_or_caps_symbol).' for items with ACLs and/or capability attributes, and show permission bits resulting from each access ACL',
+  'xattrs' => 'Show the symbol '.format_quoted($xattr_symbol).' for items with extended attributes (not counting ACLs and capabilities)',
+  'extents' => 'Show which files are stored across multiple extents, or have holes or copy-on-write extents shared with other files',
+  'opened' => 'Indicate files opened by any processes, and how they are used (i.e. via a fd, mmap, root, cwd, etc)',
+
+  [ OPTION_HELP_CATEGORY, Y_2_3 ] => Y.'Formatting and output concerning entire list',
+
+  'column-headers' => 'Show column headers with descriptions of each field in the listing',
+  'combine-uid-gid' => 'If all items in a directory are owned by the same user and/or group, print this fact twice (before and after the listing), rather than wasting space by putting it on every line',
+  'comma' => 'Insert commas (every three decimal digits) into file sizes and other large integers',
+  'digits' => 'Maximum number of decimal digits to show in large file sizes before scaling by next power of 1024',
+  'human-readable' => 'Human readable file sizes, abbreviated with Kb/Mb/Gb/Tb/etc units',
+  'shaded-color-coeff' => 'Brightness of darker shaded RGB colors relative to corresponding normal colors',
+
+  [ OPTION_HELP_CATEGORY, M_2_3 ] => M.'Symbolic links',
+
+  'follow-cmdline' => 'Follow symlinks specified on the command line (explicitly or via wildcards) and show the field values for the target of each such symlink',
+  'follow' => 'Follow all symlinks (whether found in a directory or specified on the command line) and show the field values for their ultimate resolved target paths',
+
+  [ OPTION_HELP_CATEGORY, R_2_3 ] => R.'Filtering matching values within specific fields',
+
+  (map { 'in-'.$_ => 'Show items where the '.M.$_.X.' field\'s value matches the specified value (numerical or string, depending on the field)' } sort keys %stat_field_name_to_index_map),
+  (map { 'not-'.$_ => 'Show items where the '.M.$_.X.' field\'s value matches the specified value (numerical or string, depending on the field)' } sort keys %stat_field_name_to_index_map),
+  'and' => 'Boolean intersection (AND) of the options (e.g. '.M.'-in-'.elipsis_three_dots.X.' ++before and after this option',
+  'or' => 'Boolean union (OR) of the options (e.g. '.M.'-in-'.elipsis_three_dots.X.' ++before and after this option',
+  # 'not' => 'Boolean inverse (NOT) of associated option (e.g. '.M.'-in-'.elipsis_three_dots.X.' ++before and after this option',
+  # 'xor' => 'Boolean intersection (AND) of the options (e.g. '.M.'-in-'.elipsis_three_dots.X.' ++before and after this option',
 );
-  
+
 while (my ($field, $index) = each %stat_field_name_to_index_map) {
   $command_line_options{'in-'.$field} = [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED, [ $field.'?' ], [ $index, 0 ] ];
   $command_line_options{'not-'.$field} = [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED, [ 'not-'.$field.'?' ], [ $index, 1 ] ];
@@ -1435,6 +1341,8 @@ sub main(@) {
   $stats_to_query |= STATS_QUERY_ACLS if ($show_acls);
   $stats_to_query |= STATS_QUERY_EXTENTS if ($show_extents);
 
+  $stats_to_query |= STATS_FOLLOW_SYMLINKS if ($stat_symlink_target);
+
   foreach my $dirname (sort keys %dir_to_filename_list) {
     my $filenames = $dir_to_filename_list{$dirname};
     my $dirfd = $dir_to_dir_path_fd{$dirname};
@@ -1603,9 +1511,9 @@ sub main(@) {
   my $terminal_lines = get_terminal_height_in_lines();
   my $output_line_counter = 0;
 
-  print($common_messages);
+  prints($common_messages);
   $output_line_counter += $common_message_lines;
-  # if ($print_column_headers) { print($column_headers); $output_line_counter++; }
+  # if ($print_column_headers) { prints($column_headers); $output_line_counter++; }
 
   #
   # Phase 3: format and print the final listing of filenames 
@@ -1619,7 +1527,7 @@ sub main(@) {
     next if (!defined $filename);
 
     my $stats = $allstats->{$filename};
-    if (!defined $stats) { print('  '.$filename.': failed to query stats'.NL); next; }
+    if (!defined $stats) { prints('  '.$filename.': failed to query stats'.NL); next; }
     
     my $type = $stats->[STAT_TYPE];
     my $perms = $stats->[STAT_MODE];
@@ -1730,8 +1638,8 @@ sub main(@) {
   $output_line_counter += scalar @lines;
 
   if ($output_line_counter >= $terminal_lines) {
-    # if ($print_column_headers) { print($column_headers); }
-    print($common_messages);
+    # if ($print_column_headers) { prints($column_headers); }
+    prints($common_messages);
     $output_line_counter += $common_message_lines;
   }
 }

@@ -62,6 +62,19 @@ our $perl_program_first_line_shebang_re =
 my $perl_package_decl_or_use_re = 
   qr{$perl_package_decl_re | $perl_package_use_re | $end_of_includes_re}oamsx;
 
+my $undef_placeholder = '<undef>';
+
+sub printfd($;@) {
+  my ($fd, @args) = @_;
+
+  print($fd join('', (map { 
+    (!defined $_) ? $undef_placeholder :
+    ref($_) ? $_ : $_
+  } @args)));
+}
+
+sub prints { printfd(STDOUT, @_); }
+
 sub read_file($) {
   my ($filename) = @_;
 
@@ -78,10 +91,14 @@ sub read_file($) {
 sub read_directory($) {
   my ($dir) = @_;
   
-  opendir(my $fd, $dir) || 
-    { warn("Cannot open '$dir' directory"); return ( ); }
+  my @filenames = ( );
 
-  my @filenames = readdir($fd);
+  if (!opendir(my $fd, $dir)) {
+    warn("Cannot open '$dir' directory"); 
+    return @filenames;
+  }
+
+  @filenames = readdir($fd);
 
   closedir($fd);
   return @filenames;
@@ -89,11 +106,6 @@ sub read_directory($) {
 
 my @filenames = ( );
 
-foreach my $arg (@ARGV) {
-  push @filenames, ((-d $arg) ? (map { $arg.'/'.$_ } read_directory($arg)) : $arg);
-}
-
-my @filenames = ( );
 my $verbose = 0;
 my $deps_as_package_names = 0;
 my $print_file = 0;
@@ -140,7 +152,7 @@ my $processed_file_count = 0;
 foreach my $filename (@filenames) {
   $processed_file_count++;
   if ((($processed_file_count & 0xff) == 255) && $verbose) {
-    print(STDERR "\r".'Processing '.$filename.' ('.
+    printfd(STDERR, "\r".'Processing '.$filename.' ('.
             $processed_file_count.' of '.scalar(@filenames).')');
   }
 
@@ -163,7 +175,7 @@ foreach my $filename (@filenames) {
       $current_package = $package_decl;
       $package_to_filename{$current_package} = $filename;
       $deps = undef;
-      if ($verbose) { print(STDERR 'pkg '.$current_package.' (in '.$filename.')'.NL); }
+      if ($verbose) { printfd(STDERR, 'pkg '.$current_package.' (in '.$filename.')'.NL); }
     } elsif (defined $package_use) {
       if (!defined $current_package) {
         # Scripts don't usually define a package name,
@@ -171,7 +183,7 @@ foreach my $filename (@filenames) {
         $current_package = $filename;
         $package_to_filename{$current_package} = $filename;
         $deps = undef;
-        if ($verbose) { print(STDERR 'pkg '.$current_package.' (implied by '.$filename.')'.NL); }
+        if ($verbose) { printfd(STDERR, 'pkg '.$current_package.' (implied by '.$filename.')'.NL); }
       }
 
       if (!defined $deps) {
@@ -180,11 +192,11 @@ foreach my $filename (@filenames) {
       }
 
       $deps->{$package_use}++;
-      if ($verbose) { print(STDERR 'use '.$package_use.NL); }
+      if ($verbose) { printfd(STDERR, 'use '.$package_use.NL); }
 
       $package_to_prereq_dep_list{$package_use} //= { };
     } elsif (defined $end_of_includes) {
-      if ($verbose) { print(STDERR 'end of includes'.' (in '.$filename.')'.NL); }
+      if ($verbose) { printfd(STDERR, 'end of includes'.' (in '.$filename.')'.NL); }
       last;
     }
   }
@@ -211,7 +223,7 @@ while (my ($package, $dephash) = each %package_to_prereq_dep_list) {
     (exists $package_to_filename{$package}) ? TYPE_PROJECT :
     (exists $core_modules{$package}) ? TYPE_CORE :
     TYPE_EXT;
-  if ($verbose) { print(STDERR $type_to_type_name{$type}.'  '.$package.NL); }
+  if ($verbose) { printfd(STDERR, $type_to_type_name{$type}.'  '.$package.NL); }
   $package_to_type{$package} = $type;
 }
 
@@ -262,10 +274,10 @@ foreach my $package (sort keys %package_to_prereq_dep_list) {
 
   $out =~ s{::}{.}oamsxg;
 
-  print($out) if (length $out);
+  prints($out) if (length $out);
 }
 
-print(NL);
-print('deps[ALL] := '.join(' ', sort keys %all_projdeps).NL) if ($print_all_project_deps);
-print('extdeps[ALL] := '.join(' ', sort keys %all_extdeps).NL) if ($print_all_ext_deps);
-print('coredeps[ALL] := '.join(' ', sort keys %all_coredeps).NL) if ($print_all_core_deps);
+prints(NL);
+prints('deps[ALL] := '.join(' ', sort keys %all_projdeps).NL) if ($print_all_project_deps);
+prints('extdeps[ALL] := '.join(' ', sort keys %all_extdeps).NL) if ($print_all_ext_deps);
+prints('coredeps[ALL] := '.join(' ', sort keys %all_coredeps).NL) if ($print_all_core_deps);

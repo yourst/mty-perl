@@ -29,9 +29,9 @@ use Scalar::Util qw(blessed isdual refaddr reftype tainted isweak isvstring look
 use List::Util;
 use Hash::Util;
 use List::Util qw(reduce any all none notall first sum0 pairgrep pairfirst pairmap pairs pairkeys pairvalues); # qw(max min)
-use List::MoreUtils qw(firstidx lastidx insert_after insert_after_string indexes firstval lastval pairwise each_array each_arrayref natatime uniq minmax); # qw(true false apply before before_incl after after_incl part)
-use Hash::MoreUtils qw(slice slice_def slice_exists slice_grep hashsort safe_reverse);
-use String::Util qw(crunch hascontent nocontent trim ltrim rtrim  define unquote no_space equndef neundef ords deords crunchlines);
+# use List::MoreUtils qw(firstidx lastidx insert_after insert_after_string indexes firstval lastval pairwise each_array each_arrayref natatime uniq minmax); # qw(true false apply before before_incl after after_incl part)
+# use Hash::MoreUtils qw(slice slice_def slice_exists slice_grep hashsort safe_reverse);
+# use String::Util qw(crunch hascontent nocontent trim ltrim rtrim define unquote no_space equndef neundef ords deords crunchlines);
 #pragma end_of_includes
 
 my %ref_type_to_color_and_sigil = (
@@ -107,7 +107,7 @@ sub print_var($+;$) {
   my ($name, $obj, $fd) = @_;
 
   $fd //= STDOUT;
-  print($fd format_var($name, $obj).NL);
+  printfd($fd, format_var($name, $obj).NL);
   return $obj;
 }
 

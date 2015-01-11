@@ -99,7 +99,6 @@ use MTY::RegExp::Tools;
 use MTY::RegExp::Blocks;
 use MTY::RegExp::Numeric;
 use MTY::RegExp::Strings;
-use Data::Printer;
 
 #
 # Defaults:
@@ -385,7 +384,7 @@ noexport:; sub subtree_to_text {
     push @$out, $fields;
   }
 
-  # $nodelist->[0] is this node's text to print (already printed by the 
+  # $nodelist->[0] is this node's text to prints(already printed by the 
   # calling subtree_to_text()), so we start with index 1 here:
 
   for (my $i = 1; $i < $node_count; $i++) {
@@ -508,7 +507,7 @@ sub print_tree($;$$$$$$$$$) {
 
   $fd //= STDOUT;
   my $out_lines = tree_to_lines($node, @_[2..((scalar @_)-1)]);
-  foreach $line (@$out_lines) { print($fd $line); }
+  foreach $line (@$out_lines) { printfd($fd, $line); }
   return $out_lines;
 }
 
@@ -607,7 +606,7 @@ sub dependency_graph_to_tree($+;+$+$) {
 # except for the first (root) entry must be >= 1.
 #
 our $split_leading_spaces_from_text_re = 
-  compile_regexp(qr{^ ([\ \t]*+) ([^\n]*+) (?> \n | \Z)}oamsx, 
+  compile_regexp(qr{^ ([\ \t]*+) (\N*+) (?> \n | \Z)}oamsx, 
                  'split_leading_spaces_from_text');
 
 noexport:; sub create_histogram_of_used_levels($$) {
@@ -758,10 +757,13 @@ sub delimited_paths_to_tree_of_hashes(+;$+) {
   return $root;
 }
 
-sub tree_of_hashes_to_printable_tree {
-  my ($hash_root, $name, $metadata, $parent) = @_;
+my $tree_format_if_no_metadata_color = fg_color_rgb(180, 108, 255);
 
-  my $label = $metadata // $name;
+sub tree_of_hashes_to_printable_tree {
+  my ($hash_root, $name, $metadata, $format_if_no_metadata, $parent) = @_;
+
+  $format_if_no_metadata //= $tree_format_if_no_metadata_color;
+  my $label = $metadata // $format_if_no_metadata.$name;
 
   my $tree_node = (is_array_ref $metadata) ? $metadata : 
     [ [ TREE_CMD_SYMBOL, ((defined $metadata) ? arrow_tri : arrow_open_tri) ], $label ];
@@ -771,7 +773,7 @@ sub tree_of_hashes_to_printable_tree {
   while (my ($subnode_name, $subnode) = each %$hash_root) {
     next if (!length $subnode_name);
     my $metadata = $subnode->{''};
-    push @$tree_node, tree_of_hashes_to_printable_tree($subnode, $subnode_name, $metadata, $tree_node);
+    push @$tree_node, tree_of_hashes_to_printable_tree($subnode, $subnode_name, $metadata, $format_if_no_metadata, $tree_node);
   }
 
   return $tree_node;

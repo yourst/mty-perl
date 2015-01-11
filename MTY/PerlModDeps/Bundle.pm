@@ -57,7 +57,7 @@ sub generate_module_bundle(+$) {
     $filename = $bundle_name;
     $bundle_name =~ s{$remove_modpath_re}{}oag if defined($remove_modpath_re);
     $bundle_name =~ s{/}{::}oag;
-    print(STDERR $Y.$U.'NOTE:'.$X.' creating module named '.
+    printfd(STDERR, $Y.$U.'NOTE:'.$X.' creating module named '.
       $G.$bundle_name.$X.' in specified output file '.$Y.$filename.$X.NL.NL);
   }
 
@@ -83,18 +83,18 @@ sub generate_module_bundle(+$) {
         'specified -bundle='.$bundle_name.' option; assuming "All"');
     }
 
-    print(STDERR $K.' '.dot.' '.$C.$U.'NOTE:'.$UX.$B.' None of the modules '.
+    printfd(STDERR, $K.' '.dot.' '.$C.$U.'NOTE:'.$UX.$B.' None of the modules '.
             'explicitly specified a bundle name, so setting default to requested '.
             'bundle name '.$G.format_quoted($default_bundle_name).$B.
               ' and module name '.$Y.format_module_name($bundle_name, $Y).$X.NL);
-    print(STDERR NL);
+    printfd(STDERR, NL);
 
     foreach $m (@$modules) {
       next if (defined $m->{nobundle});
       add_module_to_bundle($m, $default_bundle_name);
     }
   } else {
-    print(STDERR $K.' '.dot.' '.$C.$U.'NOTE:'.$UX.$B.' Some of the modules already '.
+    printfd(STDERR, $K.' '.dot.' '.$C.$U.'NOTE:'.$UX.$B.' Some of the modules already '.
             'explicitly specified the bundle(s) to which they belong'.$X.NL.NL);
   }
 

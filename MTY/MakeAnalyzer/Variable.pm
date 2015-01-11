@@ -112,13 +112,13 @@ sub create_reverse_map_of_path_variable_values_to_names(+;+) {
   my $DEBUG = 1;
 
   if ($DEBUG) {
-    print(STDERR $C.$U.'Creating a reverse mapping of variables which specify directory names...'.$X.NL);
+    printfd(STDERR, $C.$U.'Creating a reverse mapping of variables which specify directory names...'.$X.NL);
   }
 
   while (my ($k, $v) = each %{$revmap}) {
     $v = normalize_trailing_slash($v);
     if ($DEBUG) { 
-      print(STDERR '  '.$G.checkmark.' '.$Y.$U.$k.$UX.
+      printfd(STDERR, '  '.$G.checkmark.' '.$Y.$U.$k.$UX.
             $K.' ('.$B.'built-in'.$K.')'.$B.' = '.
              $K.left_quote.fg_gray(216).$v.$K.right_quote.
             $G.' '.checkmark.' is a directory!'.$UX.'  '.$X.NL); 
@@ -141,7 +141,7 @@ sub create_reverse_map_of_path_variable_values_to_names(+;+) {
       $revmap->{$v} = $k;
       $dirvars++; 
       if ($DEBUG) { 
-        print(STDERR '  '.$G.checkmark.' '.$Y.$U.$k.$UX.
+        printfd(STDERR, '  '.$G.checkmark.' '.$Y.$U.$k.$UX.
                 $K.' ('.($o eq 'makefile' ? $C : $R).$o.$K.')'.$B.' = '.
                 $K.left_quote.fg_gray(216).$v.$K.right_quote.
                 $G.' '.checkmark.' '.$U.'is a directory!'.$UX.'  '.$X.NL); 
@@ -150,13 +150,12 @@ sub create_reverse_map_of_path_variable_values_to_names(+;+) {
   }
 
   if ($DEBUG) {  
-    print(STDERR $C.' '.checkmark.' done'.$X.NL);
-    print(STDERR 
-            $K.' '.dot.' '.$C.padstring($varcount, -5).' '.$Y.'total variables'.$X.NL.
+    printfd(STDERR, $C.' '.checkmark.' done'.$X.NL);
+    printfd(STDERR,             $K.' '.dot.' '.$C.padstring($varcount, -5).' '.$Y.'total variables'.$X.NL.
              $K.' '.dot.' '.$C.padstring($uniquevars, -5).' '.$Y.'unique variable values'.$X.NL.
              $K.' '.dot.' '.$C.padstring($candidates, -5).' '.$Y.'candidate values which may be directories'.$X.NL.
                   $K.' '.dot.' '.$C.padstring($dirvars, -5).' '.$Y.'values which actually named directories'.$X.NL.NL);
-    print(STDERR NL);
+    printfd(STDERR, NL);
   }
 
   return $revmap;
@@ -167,7 +166,7 @@ sub print_variables_in_category(+$;$) {
 
   $fd //= STDOUT;
 
-  print($fd NL.text_in_a_box($Y.$category.$G.' Variables'.$B.
+  printfd($fd, NL.text_in_a_box($Y.$category.$G.' Variables'.$B.
     ' ('.scalar(@$varlist).')'.$X, 0, $G, 'single', undef, 20, 40).NL);
   
   foreach my $v (@$varlist) {

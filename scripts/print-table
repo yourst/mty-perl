@@ -32,8 +32,8 @@ my %alignment_name_to_value = (
 
 my %command_line_options = (
   'width', [ \$max_line_width, OPTION_VALUE_REQUIRED, [ 'w' ] ],
-  'separator', [ \$separator, OPTION_VALUE_REQUIRED, [ 'sep', 's', 'delim' ] ],
-  'align', [ \@alignments, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ 'a', 'alignment' ], \%alignment_name_to_value ],
+  'separator', [ \$separator, OPTION_VALUE_REQUIRED, [qw(sep s delim)] ],
+  'align', [ \@alignments, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [qw(a alignment)], \%alignment_name_to_value ],
 );
 
 my %command_line_help = (

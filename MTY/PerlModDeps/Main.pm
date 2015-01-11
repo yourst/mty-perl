@@ -163,8 +163,6 @@ use MTY::PerlModDeps::Imports;
 use MTY::PerlModDeps::Bundle;
 use MTY::PerlModDeps::Deps;
 
-use Data::Dumper;
-use Data::Printer;
 
 use PPI;
 use PPI::Document;
@@ -176,7 +174,6 @@ use PPI::Dumper;
 
 use File::Basename qw(fileparse);
 
-use DateTime;
 
 #pragma end_of_includes
 
@@ -251,9 +248,11 @@ my $command_line_option_names_and_categories = [
 ];
 
 my @command_line_options_help = (
-  show_banner() => [ OPTION_HELP_LITERAL ],
-  'Syntax' => [ OPTION_HELP_SYNTAX ],
-  'Actions and Modes of Operation' => [ OPTION_HELP_CATEGORY ],
+  [ OPTION_HELP_LITERAL ] => show_banner(),
+  [ OPTION_HELP_SYNTAX ] => 'Syntax',
+
+  [ OPTION_HELP_CATEGORY ] => 'Actions and Modes of Operation',
+
   'info' => '',
   'imports' => '',
   'exports' => '',
@@ -262,13 +261,17 @@ my @command_line_options_help = (
   'makefile' => '',
   'dump' => '',
   'ppi' => '',
-  'General Options' => [ OPTION_HELP_CATEGORY ],
+
+  [ OPTION_HELP_CATEGORY ] => 'General Options',
+
   'quiet' => '',
   'debug' => '',
   'nowarn' => '',
   'no-output' => '',
   'dry-run' => '',
-  'Selection and Processing Options' => [ OPTION_HELP_CATEGORY ],
+
+  [ OPTION_HELP_CATEGORY ] => 'Selection and Processing Options',
+
   'show-unmodified-modules' => '',
   'modpath' => '',
   'namespaces' => '',
@@ -344,8 +347,8 @@ sub main {
     $message = M.asterisk.'  '.Y.$message.' '.C.scalar(@modlist).Y.' Perl source files:'.X.NL;
     if ($is_stdio) { $message .= B.'(Processing stdin -> stdout instead of updating files)'.NL; }
     printfd(STDERR, show_banner());
-    print(STDERR text_in_a_box($message, 0, R, 'rounded', 'single'));
-    print(STDERR NL);
+    printfd(STDERR, text_in_a_box($message, 0, R, 'rounded', 'single'));
+    printfd(STDERR, NL);
   }
 
   if (defined $ppi_cache_path) {  
@@ -390,7 +393,7 @@ sub main {
 
   if ($makefile_mode) {
     my $makedeps = generate_makefile_deps(@modlist, $makefile_target_prefix_dir);
-    print(STDOUT $makedeps);
+    printfd(STDOUT, $makedeps);
   } elsif (defined $module_bundle_name) {
     my $bundle = generate_module_bundle(@modlist, $module_bundle_name);
     $bundle->{filename} = $module_bundle_filename;
@@ -424,7 +427,7 @@ sub main {
         padstring($n, -$mod_count_field_width).$K.' modules'.$X.NL;
     }
 
-    print(STDERR NL.text_in_a_box('%{tab}%C%USummary%X'.NL.$message, ALIGN_LEFT, $B, 'rounded').NL);
+    printfd(STDERR, NL.text_in_a_box('%{tab}%C%USummary%X'.NL.$message, ALIGN_LEFT, $B, 'rounded').NL);
   } elsif ($ppi_tree_mode) {
     foreach $m (@modlist) {
       next if (!defined($m));
@@ -433,7 +436,7 @@ sub main {
     }
   }
 
-  print(STDERR NL.$M.'Done!'.$X.NL.NL) if (!$quiet);
+  printfd(STDERR, NL.$M.'Done!'.$X.NL.NL) if (!$quiet);
 
   return 0;
 }

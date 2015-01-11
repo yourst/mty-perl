@@ -25,10 +25,10 @@ my $lighter_color_rgb = \@base_color_rgb;
 my $darker_color_rgb = scale_rgb(@base_color_rgb, $scale);
 
 my %command_line_options = (
-  'scale' => [ \$scale, OPTION_VALUE_REQUIRED, ['s', 'contrast'] ],
-  'color' => [ \@base_color_rgb, OPTION_VALUE_REQUIRED, ['c', 'base', 'basecolor', 'base-color'] ],
-  'lighter' => [ \@{$lighter_color_rgb}, OPTION_VALUE_REQUIRED, ['light', 'l'] ],
-  'darker' => [ \@{$darker_color_rgb}, OPTION_VALUE_REQUIRED, ['dark', 'd'] ]
+  'scale' => [ \$scale, OPTION_VALUE_REQUIRED, [qw(s contrast)] ],
+  'color' => [ \@base_color_rgb, OPTION_VALUE_REQUIRED, [qw(c base basecolor base-color)] ],
+  'lighter' => [ \@{$lighter_color_rgb}, OPTION_VALUE_REQUIRED, [qw(light l)] ],
+  'darker' => [ \@{$darker_color_rgb}, OPTION_VALUE_REQUIRED, [qw(dark d)] ]
 );
 
 parse_and_check_command_line(%command_line_options, @ARGV);
@@ -41,5 +41,5 @@ while (<STDIN>) {
   chomp;
   my $linenum = $.;
   my $color = (($linenum & 1) == 0) ? $lighter_color : $darker_color;
-  print(STDOUT $color.' '.$_.' '.$X.NL);
+  printfd(STDOUT, $color.' '.$_.' '.$X.NL);
 }

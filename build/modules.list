@@ -22,6 +22,7 @@ MTY/Display/Scrollable.pm
 MTY/Display/Table.pm
 MTY/Display/TextInABox.pm
 MTY/Display/Tree.pm
+MTY/Filesystem/AccessibleCache.pm
 MTY/Filesystem/BtrFS.pm
 MTY/Filesystem/CurrentDir.pm
 MTY/Filesystem/EnhancedFileStats.pm
@@ -36,6 +37,12 @@ MTY/Filesystem/PathCache.pm
 MTY/Filesystem/ProcFS.pm
 MTY/Filesystem/SearchableDirList.pm
 MTY/Filesystem/StatsCache.pm
+MTY/ListDeps/C.pm
+MTY/ListDeps/ListDeps.pm
+MTY/ListDeps/Makefile.pm
+MTY/ListDeps/Perl.pm
+MTY/ListDeps/ShellScript.pm
+MTY/ListDeps/Source.pm
 MTY/MakeAnalyzer/Common.pm
 MTY/MakeAnalyzer/Log.pm
 MTY/MakeAnalyzer/MakeDatabaseParser.pm

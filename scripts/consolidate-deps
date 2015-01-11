@@ -19,7 +19,7 @@ sub check_circular_dependency {
   $marks //= { };
   $depth //= 0;
 
-  # print('check_circular_dependency: '.('  ' x $depth).' '.$target.' ('.$depth.')'.NL);
+  # prints('check_circular_dependency: '.('  ' x $depth).' '.$target.' ('.$depth.')'.NL);
 
   my $deplist = $deps->{$target};
   if (!defined $deplist) { return $depth; }
@@ -28,7 +28,7 @@ sub check_circular_dependency {
 
   foreach my $dep (@$deplist) {
     if (exists $marks->{$dep}) { 
-      # print('<'.$dep.' is circular>'.NL); 
+      # prints('<'.$dep.' is circular>'.NL); 
       return undef; 
     }
     $marks->{$dep} = 1;
@@ -61,20 +61,20 @@ foreach my $target (@targets) {
   my $depth = check_circular_dependency(\%deps, $target);
   my $deplist = $deps{$target};
   if (defined $depth) {
-    print($target.': '.join(' ', @$deplist).NL);
+    prints($target.': '.join(' ', @$deplist).NL);
   } else {
     $circular_deps{$target}++;
   }
-  # print('[ '.((defined $depth) ? padstring($depth, 8) : 'circular').' ] '. $target.': '.join(' ', @$deplist).NL);
+  # prints('[ '.((defined $depth) ? padstring($depth, 8) : 'circular').' ] '. $target.': '.join(' ', @$deplist).NL);
 }
 
 if (sizeof(%circular_deps) > 0) {
-  print('.circular-deps: '.join(' ', (sort keys %circular_deps)).NL);
+  prints('.circular-deps: '.join(' ', (sort keys %circular_deps)).NL);
 }
 
 
 #while (my ($target, $deplist) = each %deps) {
-#  print($target.': '.join(' ', @$deplist).NL);
+#  prints($target.': '.join(' ', @$deplist).NL);
 #}
 
 exit 0;

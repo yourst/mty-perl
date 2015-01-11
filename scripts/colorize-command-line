@@ -17,7 +17,7 @@ $terminal = $ENV{'TERM'} || 'dumb';
 # If it's in the list of terminal types not to color, or if
 # we're writing to something that's not a tty, don't do color.
 if (! -t STDERR || ($terminal eq 'dumb')) {
-  while (<STDIN>) { print(STDERR $_); }
+  while (<STDIN>) { printfd(STDERR, $_); }
   exit 0;
 }
 
@@ -48,7 +48,7 @@ while (<STDIN>) {
 # s/(?<=\s)(-(?:W\S+|\S*error\S*))(?=\s+)/${RED}$1${NOCOLOR}/g;
 # s/(\s+(\-I.+?)\s+)/${CYAN}$1${NOCOLOR}/g;
 
-  print("$_\n");
+  prints("$_\n");
 }
 
 exit 0;

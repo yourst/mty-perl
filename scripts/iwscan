@@ -106,9 +106,9 @@ my $quiet = 0;
 sub print_debug {
   return if (!$debug);
   STDOUT->flush();
-  print(STDERR $K.double_left_angle_bracket.$R.' ');
-  print(STDERR @_);
-  print(STDERR $K.' '.double_right_angle_bracket.$X.NL);
+  printfd(STDERR, $K.double_left_angle_bracket.$R.' ');
+  printfd(STDERR, @_);
+  printfd(STDERR, $K.' '.double_right_angle_bracket.$X.NL);
 }
 
 my %command_line_options = (
@@ -117,11 +117,11 @@ my %command_line_options = (
   'ssid' => [ \$filter_to_only_ssid, OPTION_VALUE_REQUIRED, 's' ],
   'current' => [ \$show_current_info, 'c' ],
   'verbose' => [ \$verbose, 0, 'v' ],
-  'stdin' => [ \$read_scan_data_from_stdin, 0, ['r', 'from-stdin', 'test'] ],
-  'machine-readable' => [ \$machine_readable_format, 0, ['m', 'mr', 'machine', 'raw'] ],
-  'dump' => [ \$dump_scan_data_to_stdout, 0, ['a', 'all', 'd'] ],
+  'stdin' => [ \$read_scan_data_from_stdin, 0, [qw(r from-stdin test)] ],
+  'machine-readable' => [ \$machine_readable_format, 0, [qw(m mr machine raw)] ],
+  'dump' => [ \$dump_scan_data_to_stdout, 0, [qw(a all d)] ],
   'debug' => \$debug,
-  'use-iw' => [ \$use_iw, 0, ['iw', 'u'] ],
+  'use-iw' => [ \$use_iw, 0, [qw(iw u)] ],
   'quiet' => [ \$quiet, 0, 'q' ],
   'help' => [ \$need_help, 0, 'h' ],
 );
@@ -143,16 +143,16 @@ $quiet |= $only_list_ssids || $machine_readable_format;
 #if (!$quiet) {
 
 if ($need_help) {
-  print(STDERR print_banner($C.'iwscan', $Y.'Wireless network scanner for available SSIDs, APs and more', $B));
-  print(STDERR $help);
+  printfd(STDERR, print_banner($C.'iwscan', $Y.'Wireless network scanner for available SSIDs, APs and more', $B));
+  printfd(STDERR, $help);
   exit(255);
 }
 
 if (!$quiet) {
   if ($read_scan_data_from_stdin) {
-    print(STDERR $B.' '.arrow_head.' '.$C.'Reading previously captured scan data from stdin for wireless interface '.$Y.$interface.$K.'...');
+    printfd(STDERR, $B.' '.arrow_head.' '.$C.'Reading previously captured scan data from stdin for wireless interface '.$Y.$interface.$K.'...');
   } else {
-    print(STDERR $B.' '.arrow_head.' '.$C.'Scanning wireless interface '.$Y.$interface.$K.'...');
+    printfd(STDERR, $B.' '.arrow_head.' '.$C.'Scanning wireless interface '.$Y.$interface.$K.'...');
   }
 }
 
@@ -169,16 +169,16 @@ my $iw_exit_code = $? >> 8;
 print_debug("command returned exit code $iw_exit_code (errno $!) with a ".length($text)."-byte response");
 
 if ((!defined $text) || ($iw_exit_code != 0)) {
-  print(STDERR $R.' '.x_symbol.$Y.' FAILED '.$X.NL.NL);
+  printfd(STDERR, $R.' '.x_symbol.$Y.' FAILED '.$X.NL.NL);
   die("The ".($use_iw ? 'iw' : 'iwlist')." program could not be found and/or its execution failed (error was $!)");
 }
 
 if (!$quiet) {
-  print($G.checkmark.' done!'.$X.NL.NL);
+  prints($G.checkmark.' done!'.$X.NL.NL);
 }
 
 if ($dump_scan_data_to_stdout) {
-  print($text);
+  prints($text);
   goto done;
 }
 
@@ -194,8 +194,8 @@ my $bitrate_re = qr{([\d\.]++) \s*+ ([KMG])b/s}oamsx;
 my $bitrate_mbps_re = qr{([\d\.]++) \s*+ Mb/s ;?}oamsx;
 
 my $iwlist_scan_cell_re = 
-  qr{^ \s++ Cell \s \w++ \s+ - \s+ Address: ([^\n]++) \n
-     ((?> ^ \s++ (?! Cell) [^\n]*+ \n)*+)
+  qr{^ \s++ Cell \s \w++ \s+ - \s+ Address: (\N++) \n
+     ((?> ^ \s++ (?! Cell) \N*+ \n)*+)
   }oamsx;
 
 my $iwlist_scan_attr_re = 
@@ -204,8 +204,8 @@ my $iwlist_scan_attr_re =
 #       (?: (Frequency) \s*+ : \s*+ ([\d\.]++ \s*+ [GM]Hz)) |
 #       (?: \( (Channel) \s++ ([\d]++) \) \n) |
        (?: (Quality) \s*+ = \s*+ (\d+ / \d+)) |
-       (?: (Signal [\w\s]++) \s*+ = \s*+ ([^\n]++) \n) |
-       (?: ([A-Za-z] [A-Za-z\ ]*+) \s*+ : \s*+ ([^\n]++)) |
+       (?: (Signal [\w\s]++) \s*+ = \s*+ (\N++) \n) |
+       (?: ([A-Za-z] [A-Za-z\ ]*+) \s*+ : \s*+ (\N++)) |
        (?: () ([^\n\:]++))
      )
   }oamsx;
@@ -213,13 +213,13 @@ my $iwlist_scan_attr_re =
 my $iw_scan_report_re = qr{
   ^ BSS \s ([0-9A-Fa-f\:\-]+) \s \( on \s \w+ \) \n
   ((?>
-    ^ (?! BSS) \s* [^\n]* \n
+    ^ (?! BSS) \s* \N* \n
   )+)
 }oamsx;
 
 sub generate_lines_with_leading_spaces_until_stop_marker_regexp($) {
   my ($stopmark) = @_;
-  return qr{(?> \s++ (?! $stopmark) [^\n]*+ \n)*+}oamsx;
+  return qr{(?> \s++ (?! $stopmark) \N*+ \n)*+}oamsx;
 }
 
 my $capabilities_re = '(Capabilities:) '.generate_lines_with_leading_spaces_until_stop_marker_regexp('Maximum \s RX');
@@ -228,7 +228,7 @@ my $country_re = '(Country:) '.generate_lines_with_leading_spaces_until_stop_mar
 my $field_colon_value_re = qr{
   ^ \s*+
   (?|
-    (?: (?> \* \s++)? ([^\:]+) \: \s*+ ([^\n]+) \n) |
+    (?: (?> \* \s++)? ([^\:]+) \: \s*+ (\N+) \n) |
     (?: $capabilities_re) |
     (?: $country_re)
   )
@@ -349,7 +349,7 @@ my @sorted_ssid_list = sort(keys %ssid_to_list_of_bss);
 
 if ($only_list_ssids) {
   foreach $ssid (@sorted_ssid_list) {
-    print($ssid.NL);
+    prints($ssid.NL);
   }
   exit 0;
 }
@@ -374,7 +374,7 @@ sub indent_lines($$) {
   return add_prefix_to_lines($text, $prefix);
 }
 
-print(print_folder_tab($Y.'Found '.$G.(scalar @sorted_ssid_list).$Y.' SSIDs on interface '.$C.$interface.$Y.':'));
+prints(print_folder_tab($Y.'Found '.$G.(scalar @sorted_ssid_list).$Y.' SSIDs on interface '.$C.$interface.$Y.':'));
 
 my $ssid_tree = [ 
   [
@@ -504,7 +504,7 @@ foreach $ssid (@sorted_ssid_list) {
       ];
       push @$ssid_node, $bss_node;
 
-      #print($R.join(' ', sort keys %bss_to_details).NL);
+      #prints($R.join(' ', sort keys %bss_to_details).NL);
       
       if ($debug) {
         my $rawtext = $cellinfo->{''};
@@ -540,17 +540,17 @@ print_tree($ssid_tree);
 
 #if (!$verbose) { goto done; }
 #
-#print(NL.NL.'Found '.(scalar(keys %bss_to_details)).' BSS cells (nodes or APs):'.NL);
+#prints(NL.NL.'Found '.(scalar(keys %bss_to_details)).' BSS cells (nodes or APs):'.NL);
 #
 #while (my ($bss, $details) = each %bss_to_details) {
 #  my $ssid = $details->{'SSID'} // '';
 #  next if ((defined $filter_to_only_ssid) && (defined $ssid) && ($ssid ne $filter_to_only_ssid));
-#  print(NL.'  Node or AP '.($details->{BSS} // '???').' in SSID '.($ssid // '<unknown>').':'.NL);
+#  prints(NL.'  Node or AP '.($details->{BSS} // '???').' in SSID '.($ssid // '<unknown>').':'.NL);
 #  while (my ($k, $v) = each %{$details})
 #    { printf('    %-'.$max_label_length.'s = %s\n', $k, ($v // '-')); }
 #  if ($debug) {
-#    print(STDERR '    (Raw output from "iw dev '.$interface.' scan"):'.NL);
-#    print(add_prefix_to_lines($details->{''}, 4).NL); # print the raw text we captured
+#    prints(STDERR '    (Raw output from "iw dev '.$interface.' scan"):'.NL);
+#    prints(add_prefix_to_lines($details->{''}, 4).NL); # print the raw text we captured
 #  }
 #}
 #      while (my ($key, $value) = each %$cellinfo) {
@@ -572,6 +572,6 @@ print_tree($ssid_tree);
 done:
 
 if (!$quiet) {
-  print(NL.$K.'(End of report from scanning '.$G.$interface.$K.')'.$X.NL.NL);
+  prints(NL.$K.'(End of report from scanning '.$G.$interface.$K.')'.$X.NL.NL);
 }
 

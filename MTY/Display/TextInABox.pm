@@ -439,7 +439,7 @@ BEGIN {
   $colorize_markup_chars_re = 
   '[RGBCMYKWQrgbcmykwq] | \!? [UNVX]';
 
-  $remove_markup_re = qr{(?<! [\\]) \% \{ [^\}]++ \}}oamsx;
+  $remove_markup_re = qr{(?<= %) % | (?<! [\%\\]) \% \{ [^\}]++ \}}oamsx;
 
   $markup_arg_re = qr{(?> ([^\,\}]++)(?> , | (?= \})))}oamsx;
 
@@ -481,7 +481,7 @@ BEGIN {
           ) \} |
           \[ () ($printable_symbol_spec_re) (*:SYM) 
         )
-      | ((?> [^\%\n\\] | %% | \\ .)++) (*:TEXT)
+      | ((?> [^\%\n\\] | \\ .)++) (*:TEXT)
      }oamsx, 'markup_or_text_re');
 
   $contains_endbox_re = qr{(?<! \\) \%\{endbox\}}oamsx;
@@ -503,7 +503,7 @@ sub format_horiz_line(;$$$) {
 sub print_horiz_line(;$$$$) {
   my ($color, $style_name, $width, $fd) = @_;
   $fd //= STDOUT;
-  print($fd format_horiz_line($color, $style_name, $width));
+  printfd($fd, format_horiz_line($color, $style_name, $width));
 }
 
 use constant {
@@ -549,6 +549,8 @@ sub print_folder_tab($;$$$$$$$$) {
 
   if (!$tab_is_attached_to_box) 
     { $label = colorize_insert_symbols_and_interpolate_control_chars($label); }
+
+  $label =~ s{\\ \%}{%}oamsxg;
 
   my $is_rgb_capable = 
     (is_console_color_capable() >= ENHANCED_RGB_COLOR_CAPABLE);
@@ -763,13 +765,13 @@ sub text_in_a_box($;$$$$$$$$) {
     my $first_in_line = 1;
     my $accum_chunks_to_repeat = 0;
     my $chunks_to_repeat = '';
-
+    
     local $REGMARK = undef;
     my $basepos = 0;
-
+    
     my $left_side = ($invisible_box) ? '' : $style->[VERT].$X.' ';
     my $right_side = ($invisible_box) ? '' : ' '.$color.$style->[VERT];
-
+    
     my $chunks;
     if (is_array_ref($linein)) {
       $chunks = $linein;
@@ -785,7 +787,7 @@ sub text_in_a_box($;$$$$$$$$) {
       $op //= ''; $arg1 //= ''; $arg2 //= ''; $arg3 //= ''; $arg4 //= ''; $text //= '';
 
       if ($mark eq 'TEXT') {
-        $text =~ s{(?<! \\) % \K %}{}oamsxg;
+        $text =~ s{\\ \%}{%}oamsxg;
 
         if ($rest_is_filler_to_repeat) {
           my $remaining = max($orig_width - $width_so_far, 0);

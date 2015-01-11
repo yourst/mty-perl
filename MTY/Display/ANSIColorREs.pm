@@ -115,7 +115,7 @@ our $ansi_console_escapes_and_nonprinted_control_chars_and_unicode_re = compile_
   'ansi_console_escapes_and_nonprinted_control_chars_and_unicode');
 
 our $colorize_markup_chars_re = 
-  qr{[RGBCMYKWQrgbcmykwq] | \!? [UNVX]}oax;
+  qr{[RGBCMYKWQrgbcmykwq%] | \!? [UNVX]}oax;
 
 our $color_markup_re = compile_regexp(
   qr{(?<! \\) \% 

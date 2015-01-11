@@ -40,10 +40,10 @@ if (($do_update + $do_add + $do_remove) > 1) { die("Only one of -add, -update, -
 
 if ($do_rebuild) {
   # First remove all of our auto-generated target .conf files:
-  print($R.'Cleaning and removing existing .auto.conf files...');
+  prints($R.'Cleaning and removing existing .auto.conf files...');
   $dummy = qx{find /etc/tgt/conf.d/ -name '*.auto.conf' -delete};
-  print("done\n");
-  print($dummy);
+  prints("done\n");
+  prints($dummy);
 }
 
 sub build_target_conf($$$;$$) {
@@ -72,14 +72,14 @@ sub build_target_conf($$$;$$) {
 $servername = read_file('/etc/servername');
 chomp $servername;
 
-print($Y.$U.'Querying LVM logical volumes...');
+prints($Y.$U.'Querying LVM logical volumes...');
 open(LVS, '/sbin/lvs --noheadings --nosuffix --nameprefixes -o name,vg_name,uuid,size|');
-print($G.'done'.$X."\n");
+prints($G.'done'.$X."\n");
 
 while (<LVS>) {
   chomp;
   if (my ($name, $vg, $uuid, $size) = /LV_NAME='(.+?)' .*? VG_NAME='(.+?)' .*? UUID='(.+?)' .*? SIZE='(.+?)'/oax) {
-    #print("$vg / $name ($uuid)\n");
+    #prints("$vg / $name ($uuid)\n");
     my $export_name = $servername.':'.$vg.'.'.$name;
     my $dev = '/dev/'.$vg.'/'.$name;
     $target_conf = build_target_conf($export_name, 'backing', $dev, $size, $uuid);
@@ -88,20 +88,20 @@ while (<LVS>) {
     my $conf_filename_to_display = ($conf_filename =~ s{^(/etc/tgt/conf.d/)(.+)$}{$K$1$C$2$X}roamsxg);
     if ((-f $conf_filename) && (!$use_the_force)) {
       # my $old_target_conf = read_file($conf_filename);
-      print($K.'- '.$R.'Skipped '.$C.$conf_filename_to_display.$K.' (already exists and/or has been customized)'.$X."\n");
+      prints($K.'- '.$R.'Skipped '.$C.$conf_filename_to_display.$K.' (already exists and/or has been customized)'.$X."\n");
     } else {
       write_file($conf_filename, $target_conf);
-      print($K.'- '.$G.'Created '.$C.$conf_filename_to_display.$K.$X."\n");
+      prints($K.'- '.$G.'Created '.$C.$conf_filename_to_display.$K.$X."\n");
     }
   }
 }
 
 close(LVS);
 
-print("\n");
-print($Y.$U.'Querying SATA/SCSI/SAS drives...');
+prints("\n");
+prints($Y.$U.'Querying SATA/SCSI/SAS drives...');
 open(SCSI, '/usr/bin/lsscsi -i |');
-print($G.'done'.$X."\n");
+prints($G.'done'.$X."\n");
 
 while (<SCSI>) {
   chomp;
@@ -117,10 +117,10 @@ while (<SCSI>) {
     my $conf_filename_to_display = ($conf_filename =~ s{^(/etc/tgt/conf.d/)(.+)$}{$K$1$C$2$X}roamsxg);
     if ((-f $conf_filename) && (!$use_the_force)) {
       # my $old_target_conf = read_file($conf_filename);
-      print($K.'- '.$R.'Skipped '.$C.$conf_filename_to_display.$K.' (already exists and/or has been customized)'.$X."\n");
+      prints($K.'- '.$R.'Skipped '.$C.$conf_filename_to_display.$K.' (already exists and/or has been customized)'.$X."\n");
     } else {
       write_file($conf_filename, $target_conf);
-      print($K.'- '.$G.'Created '.$C.$conf_filename_to_display.$K.$X."\n");
+      prints($K.'- '.$G.'Created '.$C.$conf_filename_to_display.$K.$X."\n");
     }
   }
 }

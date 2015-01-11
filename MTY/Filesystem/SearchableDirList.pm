@@ -112,7 +112,7 @@ noexport:; sub new($+;$) {
     my $fd = sys_open_path($dirname, undef, O_DIRECTORY);
 
     if (!defined $fd) {
-      simple_warning('Ignoring non-existent or inaccessable search path "'.$dirname.'"');
+      warn('Ignoring non-existent or inaccessable search path "'.$dirname.'"');
       next;
     }
 
@@ -219,24 +219,24 @@ sub find_perl_module($;+) {
 
 sub test_searchable_dir_list {
   my $dirlist = [ @INC ];
-  print('dirlist = [ '.join(' ', @$dirlist).' ]'.NL);
+  prints('dirlist = [ '.join(' ', @$dirlist).' ]'.NL);
 
-  my $searchfor = [ 'MTY/Common/Strings.pm', 'POSIX/2008.pm', 're.pm' ];
+  my $searchfor = [qw(MTY/Common/Strings.pm POSIX/2008.pm re.pm)];
 
   if (1) {
     my $sdl = MTY::Filesystem::SearchableDirList->new($dirlist, 'perl_inc_dirs');
     
     foreach my $target (@$searchfor, @$searchfor) {
       my $abspath = $sdl->get($target) // '???';
-      print('  '.$target.' => '.$abspath.NL);
+      prints('  '.$target.' => '.$abspath.NL);
     }
 
-    print('---------'.NL);
+    prints('---------'.NL);
     $sdl->invalidate('POSIX/2008.pm');
 
     foreach my $target (@$searchfor) {
       my $abspath = $sdl->get($target) // '???';
-      print('  '.$target.' => '.$abspath.NL);
+      prints('  '.$target.' => '.$abspath.NL);
     }
 
   } 

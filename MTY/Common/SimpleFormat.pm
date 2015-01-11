@@ -62,7 +62,7 @@ sub simple_format_array(++$;$) {
 
   $seen->{$array} = 1;
 
-  print(STDERR $prefix.'enter simple_format_array(#'.scalar(@$array).' = ['.join(', ', map { $_ // $undef_placeholder } @$array).'])'.NL);
+  printfd(STDERR, $prefix.'enter simple_format_array(#'.scalar(@$array).' = ['.join(', ', map { $_ // $undef_placeholder } @$array).'])'.NL);
 
   my $n = scalar(@$array);
   $type = typeof($array->[0]) // UNDEF;
@@ -86,8 +86,8 @@ sub simple_format_array(++$;$) {
     $out .= $prefix.'] (#'.scalar(@$array).')';
   }
 
-  print(STDERR $prefix.">>> [".$out."] <<<".NL);
-  print(STDERR $prefix.'exit simple_format_array(['.join(', ', @$array).'])'.NL);
+  printfd(STDERR, $prefix.">>> [".$out."] <<<".NL);
+  printfd(STDERR, $prefix.'exit simple_format_array(['.join(', ', @$array).'])'.NL);
   return $out;
 }
 
@@ -174,10 +174,10 @@ sub simple_format(+;+$$) {
   }
 
   my $func = $type_to_simple_format_func{$type};
-  print(STDERR ('  ' x $level), 'simple_format(', sprintf('%p', $obj), ', level ', $level, ', type ', $ref_type_index_to_string[$type], ') => func ', (sub_fullname($func).' @ '.$func), NL);
+  printfd(STDERR, ('  ' x $level), 'simple_format(', sprintf('%p', $obj), ', level ', $level, ', type ', $ref_type_index_to_string[$type], ') => func ', (sub_fullname($func).' @ '.$func), NL);
   my $out = ((defined $func) ? $func->($obj, $seen, $level+1, $type) :
                lc($ref_type_index_to_string[$type]).' '.$obj);
-  print(STDERR ('  ' x $level), '(return to simple_format of ', sprintf('%p', $obj), ')', NL);
+  printfd(STDERR, ('  ' x $level), '(return to simple_format of ', sprintf('%p', $obj), ')', NL);
   return $out;
 }
 

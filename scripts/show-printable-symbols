@@ -115,7 +115,7 @@ sub show_all_printable_symbols(;+$) {
     set_max($max_name_len, length($name));
   }
 
-  print($outfd NL.$G.$U.'Showing '.$C.(scalar @sym_list).$G.' printable Unicode symbols:'.$X.NL.NL);
+  printfd($outfd, NL.$G.$U.'Showing '.$C.(scalar @sym_list).$G.' printable Unicode symbols:'.$X.NL.NL);
 
   my $format = W.' %s '.TAB.'%s'.'%-'.$max_name_len.'s'.B.'  ['.
     G.'0x%04x'.B.']%s  '.B.' = '.M.'%-12s'.B.'  '.K.'='.X.'  ';
@@ -129,18 +129,18 @@ sub show_all_printable_symbols(;+$) {
     if (ord($symbol) == 0x1B) { $symbol = chr(0x2400 + ord($symbol)); }
     printf($outfd $format, $symbol, $found_by_to_color[$found_by], $name, ord($symbol), 
            ((length($symbol) > 1) ? $R.large_plus.' '.$X : $X.'  '), $utf8_encoding);
-    print($outfd $symbol x $repeat_count);
+    printfd($outfd, $symbol x $repeat_count);
 
     # Multi-character composite symbol: print all of its characters in order
     if (length($symbol) > 1) {
-      print($outfd $B.'  [ '.$G);
-      foreach my $cc (split('', $symbol)) { print($outfd sprintf('%04x', ord($cc)).' '); } #printf($outfd '%04x ', ord($c)); }
-      print($outfd $B.']'.$X);
+      printfd($outfd, $B.'  [ '.$G);
+      foreach my $cc (split('', $symbol)) { printfd($outfd, sprintf('%04x', ord($cc)).' '); } #printf($outfd '%04x ', ord($c)); }
+      printfd($outfd, $B.']'.$X);
     }
-    print($outfd $X.NL);
+    printfd($outfd, $X.NL);
   }
 
-  print($outfd NL);
+  printfd($outfd, NL);
 }
 
 sub show_all_printable_symbols_using_format(;$$) {
@@ -172,7 +172,7 @@ sub show_all_printable_symbols_using_format(;$$) {
   
     my $out = subst_percent_prefixed_single_chars_using_hash_of_mappings
       ($format, \%subst_hash);
-    print($outfd $out);
+    printfd($outfd, $out);
   }
 }
 
@@ -197,7 +197,7 @@ sub show_unicode_block($;$) {
     }
   }
   $out .= NL;
-  print($outfd $out);
+  printfd($outfd, $out);
   return $out;
 }
 
@@ -245,7 +245,7 @@ foreach (@ARGV) {
 $outfd = ($no_scrollable) ? STDOUT : (open_scrollable_stream() // STDOUT);
 
 if (!$quiet) {
-  print($outfd print_banner('show-printable-symbols', 'Show all Unicode console characters in MTY::Display::PrintableCharacters'.NL.
+  printfd($outfd, print_banner('show-printable-symbols', 'Show all Unicode console characters in MTY::Display::PrintableCharacters'.NL.
                             'or arbitrary Unicode subsets and ranges using 16-bit Unicode code point IDs', $B));
 }
 

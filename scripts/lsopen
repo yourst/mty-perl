@@ -216,10 +216,10 @@ my %open_type_to_id = (
 );
 
 my %command_line_options = (
-  'p' => [ \@show_specific_pids, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ 'pid', 'pids' ] ],
-  't' => [ \@show_open_types, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ 'type', 'types', 'opentypes' ], %open_type_to_id ],
-  'f' => [ \$fast_query, 0, [ 'fast', 'skip-details', 'no-details' ] ],
-  'd' => [ \$debug, 0, [ 'debug', 'dump' ] ],
+  'p' => [ \@show_specific_pids, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [qw(pid pids)] ],
+  't' => [ \@show_open_types, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [qw(type types opentypes)], %open_type_to_id ],
+  'f' => [ \$fast_query, 0, [qw(fast skip-details no-details)] ],
+  'd' => [ \$debug, 0, [qw(debug dump)] ],
 );
 
 my ($pathargs, $invalid_option_indexes) =
@@ -247,10 +247,10 @@ if (defined $pidlist) {
 
 my $open_files = ($fast_query) ? find_all_open_files_fast_skip_details($pidlist) : find_all_open_files($pidlist);
 
-if ($debug) {
-  use DDP; 
-  print(STDOUT p($open_files));
-}
+# if ($debug) {
+#   use DDP; 
+#  printfd(STDOUT, p($open_files));
+# }
 
 if (sizeof($pathargs) > 0) { $open_files = slice_of_hash($open_files, $pathargs); }
 
@@ -259,4 +259,4 @@ my $printable_tree_of_open_files = open_file_list_to_printable_tree($open_files)
 print_tree($printable_tree_of_open_files);
 
 #my @list_of_open_files = sort keys %$open_files;
-#print(join(NL, @list_of_open_files));
+#prints(join(NL, @list_of_open_files));

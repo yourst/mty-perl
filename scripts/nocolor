@@ -73,7 +73,7 @@ foreach $arg (@ARGV) {
     $program_to_exec = $arg;
     $rest_are_args_for_program = 1;
   } else {
-    print(STDERR "$0: warning: unknown option '$arg'\n");
+    printfd(STDERR, "$0: warning: unknown option '$arg'\n");
   }
 }
 
@@ -99,7 +99,7 @@ if ((defined $pass_option_if_use_color) || (defined $pass_option_if_no_color)) {
   @args_for_program = ($option, @args_for_program);
 
   if (defined $program_to_exec) {
-    # print(STDERR "exec program $program_to_exec with args ".join('|', @args_for_program).NL);
+    # prints(STDERR "exec program $program_to_exec with args ".join('|', @args_for_program).NL);
     exec($program_to_exec, @args_for_program) ||
       die("$0: Cannot execute '$program_to_exec'");
   }
@@ -114,12 +114,12 @@ if (defined $is_conditional_on_fd) {
 use constant DEBUG => 0;
 
 if (DEBUG) {
-  print(STDERR '$0 = '.$0.NL);
-  print(STDERR 'is_conditional_on_fd = '.($is_conditional_on_fd // '<undef>').NL);
-  print(STDERR 'strip_color_codes = '.$strip_color_codes.NL);
-  print(STDERR 'replace_utf8_with = '.($replace_utf8_with // '(leave in place)').NL);
-  print(STDERR '$program_to_exec = '.($program_to_exec // '<none - use stdin>').NL);
-  print(STDERR 'args_for_program = '.join(' ', @args_for_program).NL);
+  printfd(STDERR, '$0 = '.$0.NL);
+  printfd(STDERR, 'is_conditional_on_fd = '.($is_conditional_on_fd // '<undef>').NL);
+  printfd(STDERR, 'strip_color_codes = '.$strip_color_codes.NL);
+  printfd(STDERR, 'replace_utf8_with = '.($replace_utf8_with // '(leave in place)').NL);
+  printfd(STDERR, '$program_to_exec = '.($program_to_exec // '<none - use stdin>').NL);
+  printfd(STDERR, 'args_for_program = '.join(' ', @args_for_program).NL);
 }
 
 my $executed_pid = undef;
@@ -157,10 +157,10 @@ if ($strip_color_codes || $show_color_codes || (defined $replace_utf8_with)) {
     if ($strip_color_codes) { s{$ansi_console_escape_codes_re}{}oamsxg; }
     if ($show_color_codes) { s{($ansi_console_escape_codes_re)}{decode_ansi_color_code($1)}oamsxge; }
     if (defined $replace_utf8_with) { s/$utf8_re/$replace_utf8_with/oamsxg; }
-    print(STDOUT $_);
+    printfd(STDOUT, $_);
   }
 } else {
-  while (<$fd>) { print(STDOUT $_); }
+  while (<$fd>) { printfd(STDOUT, $_); }
 }
 
 my $rc = 0;

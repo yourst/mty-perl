@@ -95,7 +95,7 @@ my $btrfs_subvol_list_re = compile_regexp(
       top \s level \s++ (\d++) \s++ 
       parent_uuid \s++ (?> - | ($uuid_re)) \s++
       uuid \s++ ($uuid_re) \s++
-      path \s++ (?> \<FS_TREE\>\/)?+ ([^\n]++)
+      path \s++ (?> \<FS_TREE\>\/)?+ (\N++)
      }oamsx, 'btrfs_subvol_list');
 
 use constant {
@@ -153,8 +153,8 @@ sub check_for_btrfs_errors(;$) {
   return 1 if ($ok);
 
   warn_without_stack_trace($btrfs_cmd.' returned exit code '.$last_btrfs_rc.' and errno '.$!);
-  print(STDERR NL.$C.$U.'Command:'.$X.' '.$R.'(exit code '.$M.$last_btrfs_rc.$R.')'.$X.NL.NL.$G.$last_btrfs_cmdline.$X.NL.NL);
-  print(STDERR $Y.$U.'Output (from command\'s stdout):'.$X.NL.NL.$R.
+  printfd(STDERR, NL.$C.$U.'Command:'.$X.' '.$R.'(exit code '.$M.$last_btrfs_rc.$R.')'.$X.NL.NL.$G.$last_btrfs_cmdline.$X.NL.NL);
+  printfd(STDERR, $Y.$U.'Output (from command\'s stdout):'.$X.NL.NL.$R.
           $last_btrfs_output.$X.NL.$K.'[End of command output]'.$X.NL.NL);
   die;
   return 0;
@@ -208,7 +208,7 @@ my $fs_dev_re =
      devid \s++ (\d++) \s++
      size  \s++ (\S++) \s++
      used  \s++ (\S++) \s++
-     path  \s++ ([^\n]+) \n}oamsx;
+     path  \s++ (\N+) \n}oamsx;
 
 
 my $btrfs_get_default_subvolume_re = 
@@ -216,7 +216,7 @@ my $btrfs_get_default_subvolume_re =
      (?: 
        \s++ gen (\d++)
        \s++ top \s level \s++ (\d++)
-       (?: \s++ path ([^\n]++))?
+       (?: \s++ path (\N++))?
      )?
     }oamsx;
 
@@ -285,7 +285,7 @@ sub get_root_subvol_attrs($) {
     $s = run_btrfs_command('device', 'show-super', $dev_list[0]->{block_dev_path});
     check_for_btrfs_errors();
     my %superblock = ( );
-    while ($s =~ /^ (\S++) \s++ ([^\n]++) \n/oamsx) { 
+    while ($s =~ /^ (\S++) \s++ (\N++) \n/oamsx) { 
       my ($k, $v) = ($1, $2);
       $v =~ s{\s*+ \[match\]$}{}oamsxg;
       $superblock{$k} = $v; 
@@ -372,7 +372,7 @@ my %btrfs_subvol_show_output_fields_to_query_btrfs_subvol_hash_keys = (
 
 my $btrfs_subvol_show_re = 
   qr{^ \s*+ ([^\:\n]++) \: \s*+
-     ([^\n]*+) \n
+     (\N*+) \n
   }oamsx;
 
 sub query_btrfs_subvol($;$) {
@@ -456,7 +456,7 @@ sub remove_btrfs_subvol {
   return remove_btrfs_subvols(@_);
 }
 
-my $btrfs_property_re = qr{^ (\w++) \s*+ = \s*+ ([^\n]+) \n}oamsx;
+my $btrfs_property_re = qr{^ (\w++) \s*+ = \s*+ (\N+) \n}oamsx;
 
 sub get_btrfs_property($$) {
   my ($path, $property) = @_;

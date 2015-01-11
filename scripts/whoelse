@@ -18,18 +18,18 @@ foreach $user (@users) {
 $user = $ARGV[0];
 if (defined($user)) {
   $count = $unique_users{$user} // 0;
-  print($count."\n");
+  prints($count."\n");
 } else {
   $n = 0;
   foreach $user (keys %unique_users) {
     $count = $unique_users{$user};
     if ($count > 1) {
-      print("$user($count)");
+      prints("$user($count)");
     } else {
-      print("$user");
+      prints("$user");
     }
-    print(' ') if (!$n++);
+    prints(' ') if (!$n++);
   }
 
-  print("\n");
+  prints("\n");
 }

@@ -62,7 +62,7 @@ my %command_line_options = (
       $invisible_box = 1;
       $style = 'none';
       $left_space //= '';
-    }, 0, ['p', 'text', 'nobox', 'invisible'] ],
+    }, 0, [qw(p text nobox invisible)] ],
   'clear-screen' => [ \$clear_screen_first, 0, 'clear' ],
   'style' => [ \$style, OPTION_VALUE_REQUIRED, 's' ],
   'divstyle' => [ \$divstyle, OPTION_VALUE_REQUIRED, 'ds' ],
@@ -86,16 +86,16 @@ my %command_line_options = (
         $boxcolor .= $codes;
       }
     }, OPTION_VALUE_REQUIRED, 'c' ],
-  'leftspace' => [ \$left_space, OPTION_VALUE_REQUIRED, ['leftmargin', 'leftpad', 'ls'] ],
-  'rightspace' => [ \$right_space, OPTION_VALUE_REQUIRED, ['rightmargin', 'rightpad', 'rs'] ],
+  'leftspace' => [ \$left_space, OPTION_VALUE_REQUIRED, [qw(leftmargin leftpad ls)] ],
+  'rightspace' => [ \$right_space, OPTION_VALUE_REQUIRED, [qw(rightmargin rightpad rs)] ],
   'width' => [ \$width, OPTION_VALUE_REQUIRED, 'w' ],
   'curved-bottom-tab' => [ \$straight_bottom_edges, OPTION_ASSIGN_BOOL, [ ], 0, TAB_STRAIGHT_BOTTOM_EDGES ],
-  'straight-edged-tab' => [ \$straight_edged_tab, OPTION_ASSIGN_BOOL, [ 'straight', 'nocurve' ], TAB_STRAIGHT_TAB_EDGES, 0 ],
+  'straight-edged-tab' => [ \$straight_edged_tab, OPTION_ASSIGN_BOOL, [qw(straight nocurve)], TAB_STRAIGHT_TAB_EDGES, 0 ],
   'tab' => \$tab_mode,
   'div' => \$div_mode,
   'banner' => \$banner_mode,
-  'colorize' => [ sub { enable_color(); }, 0, ['enable-color', 'force-color', 'use-color' ] ],
-  'nocolor' => [ sub { disable_color(); }, 0, ['disable-color', 'no-color', 'nc'] ],
+  'colorize' => [ sub { enable_color(); }, 0, [qw(enable-color force-color use-color)] ],
+  'nocolor' => [ sub { disable_color(); }, 0, [qw(disable-color no-color nc)] ],
   'help' => [ \$show_help, 0, 'h' ],
   META_OPTION_NON_OPTIONS_REQUIRED, 1,
 );
@@ -108,14 +108,13 @@ sub format_help_tab($) {
 sub show_help {
   local $helpfd = open_scrollable_stream() // STDERR;
 
-  print($helpfd print_banner($C.'text-in-a-box', 
+  printfd($helpfd, print_banner($C.'text-in-a-box', 
     $G.'Display lines of text inside a box, in various styles and colors', $R));
 
   my $optdiv = $K.dashed_vert_bar_3_dashes.$M;
   my $altdiv = $K.dashed_vert_bar_3_dashes.$Y;
 
-  print($helpfd 
-    format_help_tab('Syntax').
+  printfd($helpfd,     format_help_tab('Syntax').
     '  '.$G.'text-in-a-box'.$Y.' -option1 -option2'.$M.'=value2 '.$K.' '.
       '[-option3'.elipsis_three_dots.']'.$C." 'line1' 'line2' ".$K.elipsis_three_dots.$X.NL.
     format_help_tab('Options').
@@ -165,7 +164,7 @@ sub show_help {
     '  '.$Y.'%{endbox}'.$X.NL.
     '    '.$X.'End the contents of the box; subsequent lines displayed outside the box'.$X.NL;
 
-  print($helpfd format_help_tab('Examples of box styles using the '.$Y.'-style'.$C.' option'));
+  printfd($helpfd, format_help_tab('Examples of box styles using the '.$Y.'-style'.$C.' option'));
 
   my @example_lines = ( );
 
@@ -181,10 +180,10 @@ sub show_help {
   }
 
   foreach $line (@example_lines) {
-    print($helpfd $line.NL);
+    printfd($helpfd, $line.NL);
   }
 
-  print($helpfd format_help_tab('Examples of the '.$Y.'-style'.$C.' and '.$G.'-divstyle'.$C.' options'));
+  printfd($helpfd, format_help_tab('Examples of the '.$Y.'-style'.$C.' and '.$G.'-divstyle'.$C.' options'));
 
   @example_lines = ( );
 
@@ -203,31 +202,31 @@ sub show_help {
   }
 
   foreach $line (@example_lines) {
-    print($helpfd $line.NL);
+    printfd($helpfd, $line.NL);
   }
 
-  print($helpfd NL.format_help_tab('Examples of the '.$K.left_quote.$Y.'-tab "Label Here"'.$K.right_quote.$C.' option'));
+  printfd($helpfd, NL.format_help_tab('Examples of the '.$K.left_quote.$Y.'-tab "Label Here"'.$K.right_quote.$C.' option'));
 
   my $max_tab_space = (3+2+12+2) * 4;  # match the total width of the example boxes printed above
-  print($helpfd print_folder_tab('Label Here %K(with %Y-align=%U%Cleft%!U%K)', undef, ALIGN_LEFT, $max_tab_space));
-  print($helpfd print_folder_tab('Label Here %K(with %Y-align=%U%Ccenter%!U%K)', undef, ALIGN_CENTER, $max_tab_space));
-  print($helpfd print_folder_tab('Label Here %K(with %Y-align=%U%Cright%!U%K)', undef, ALIGN_RIGHT, $max_tab_space));
-  print($helpfd print_folder_tab('Label Here %K(with %Y-color=%RR%!U%K)', $R, ALIGN_LEFT, $max_tab_space));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%U%Cleft%!U%K)', undef, ALIGN_LEFT, $max_tab_space));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%U%Ccenter%!U%K)', undef, ALIGN_CENTER, $max_tab_space));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%U%Cright%!U%K)', undef, ALIGN_RIGHT, $max_tab_space));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-color=%RR%!U%K)', $R, ALIGN_LEFT, $max_tab_space));
 
   my $filler_text = $K.('.' x 20).$B.'Remaining lines in box here'.$K.('.' x 20).NL;
 
-  print($helpfd NL.format_help_tab('Example of the '.$K.left_quote.$Y.'%{tab}Label Here'.$K.right_quote.$C.' option'));
-  print($helpfd text_in_a_box('%{tab}Label Here'.NL.$filler_text));
-  print($helpfd text_in_a_box('%{tab=center,flat}Label Here %K(with %Y%{tab=%Mcenter,flat%Y}%K)'.NL.$filler_text, ALIGN_LEFT));
+  printfd($helpfd, NL.format_help_tab('Example of the '.$K.left_quote.$Y.'%{tab}Label Here'.$K.right_quote.$C.' option'));
+  printfd($helpfd, text_in_a_box('%{tab}Label Here'.NL.$filler_text));
+  printfd($helpfd, text_in_a_box('%{tab=center,flat}Label Here %K(with %Y%{tab=%Mcenter,flat%Y}%K)'.NL.$filler_text, ALIGN_LEFT));
 
-  print($helpfd NL.format_help_tab('Examples of the '.$K.left_quote.$Y.'-div "Label Here"'.$K.right_quote.$C.' option'));
+  printfd($helpfd, NL.format_help_tab('Examples of the '.$K.left_quote.$Y.'-div "Label Here"'.$K.right_quote.$C.' option'));
 
-  print($helpfd print_folder_tab('Label Here %K(with %Y-align=%Cleft%K)', undef, ALIGN_LEFT, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
-  print($helpfd print_folder_tab('Label Here %K(with %Y-align=%Ccenter%K)', undef, ALIGN_CENTER, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
-  print($helpfd print_folder_tab('Label Here %K(with %Y-align=%Cright%K)', undef, ALIGN_RIGHT, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
-  print($helpfd print_folder_tab('Label Here %K(with %Y-color=%RR%K)', $R, ALIGN_CENTER, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%Cleft%K)', undef, ALIGN_LEFT, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%Ccenter%K)', undef, ALIGN_CENTER, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%Cright%K)', undef, ALIGN_RIGHT, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-color=%RR%K)', $R, ALIGN_CENTER, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
 
-  print($helpfd NL);
+  printfd($helpfd, NL);
 
   exit 0;
 }
@@ -267,6 +266,6 @@ if ($banner_mode) {
   $out .= text_in_a_box($lines, $alignment, $boxcolor, $style, $divstyle, $left_space, $width, $right_space);
 }
 
-print(STDOUT $out);
+printfd(STDOUT, $out);
 
 exit 0;

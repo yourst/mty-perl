@@ -24,7 +24,7 @@ my $use_color = undef;
 
 my %command_line_options = (
   'width', [ \$max_line_width, OPTION_VALUE_REQUIRED, [ 'w' ] ],
-  'long', [ \$unlimited_width, 0, [ 'long-lines', 'unlimited-width', 'u', 'l' ] ],
+  'long', [ \$unlimited_width, 0, [qw(long-lines unlimited-width u l)] ],
   'color', [ \$use_color, 0, [ 'c' ] ],
 );
 

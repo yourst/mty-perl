@@ -46,12 +46,12 @@ my $read_from_stdin = (! -t 0);
 
 my %command_line_options = (
   'prefixes' => [ \$group_by_prefixes, 0, ['p'] ],
-  'separator' => [ \$sep, OPTION_VALUE_REQUIRED, ['sep', 's'] ],
+  'separator' => [ \$sep, OPTION_VALUE_REQUIRED, [qw(sep s)] ],
   'suffix-count' => [ \$suffix_count, OPTION_VALUE_REQUIRED, ['n'] ],
   'divider' => [ \$divider, OPTION_VALUE_REQUIRED, ['d'] ],
   'brackets' => [ \$bracket_style, OPTION_VALUE_REQUIRED, ['b'] ],
   'linesep' => [ \$line_separator, 0, ['l'] ],
-  'split-only' => [ \$split_only, 0, ['o', 'so', 'split'] ],
+  'split-only' => [ \$split_only, 0, [qw(o so split)] ],
   'tree' => [ \$print_tree, 0, ['t'] ],
   'tree-suffixes' => [ \$print_tree_suffixes, 0, ['ts'] ],
   'nocolor' => [ \$no_color, 0, ['nc'] ],
@@ -88,7 +88,7 @@ foreach $name (@$names) {
   my ($prefix, $suffixes) = split_using_suffix_regexp($name, $suffixes_re);
 
   if ($split_only) {
-    print($prefix.$divider.$suffixes.$line_separator);
+    prints($prefix.$divider.$suffixes.$line_separator);
     next;
   }
 
@@ -110,13 +110,13 @@ if ($print_tree) {
   foreach $suffix (@sorted_suffixes) {
     my $prefix_list = $suffixes_to_prefix_list{$suffix};
     my $suffix_formatted = $suffix =~ s{\.}{$B.$C}roaxg;
-    print($R.$left_bracket_style.
+    prints($R.$left_bracket_style.
           $Y.join($K.$divider.$Y, @$prefix_list).
           $R.$right_bracket_style.
           $suffix_formatted.$X.$line_separator);
   }
 }
 
-if ($line_separator ne NL) { print(NL); }
+if ($line_separator ne NL) { prints(NL); }
 
 exit 0;

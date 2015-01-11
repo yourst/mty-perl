@@ -178,7 +178,7 @@ sub get_capture_group_types_names_contents($) {
   while (my ($name, $contents) = $re =~ /$regexp_capture_group_re/oamsxg) {
     my $number = $n;
     $name //= '';
-    print('$'.$number.': name ['.$name.'], contents ['.$contents.']'.NL);
+    prints('$'.$number.': name ['.$name.'], contents ['.$contents.']'.NL);
     $n++;
     push @grouplist, [ $number, $name, $contents ];
   }
@@ -310,12 +310,12 @@ sub count_matches($$;+) {
 }
 
 my $key_anysep_value_line_re =
-  qr{^ ([^\t\:\=\>\?]+?) \s*+ [\t\:\=\>\?]++ \s*+ ([^\n]*+) \n}oamsx,
+  qr{^ ([^\t\:\=\>\?]+?) \s*+ [\t\:\=\>\?]++ \s*+ (\N*+) \n}oamsx,
 
 my %key_sep_value_line_re_list = (
-  ":" => qr/^ ([^\:]+?) \s*+ \: \s*+ ([^\n]*+) \n/oamsx,
-  "=" => qr/^ ([^\=]+?) \s*+ \= \s*+ ([^\n]*+) \n/oamsx,
-  "\t" => qr/^ ([^\t]+?) \s*+ \t \s*+ ([^\n]*+) \n/oamsx
+  ":" => qr/^ ([^\:]+?) \s*+ \: \s*+ (\N*+) \n/oamsx,
+  "=" => qr/^ ([^\=]+?) \s*+ \= \s*+ (\N*+) \n/oamsx,
+  "\t" => qr/^ ([^\t]+?) \s*+ \t \s*+ (\N*+) \n/oamsx
 );
 
 sub split_lines_into_keys_and_values($;$) {
@@ -323,7 +323,7 @@ sub split_lines_into_keys_and_values($;$) {
 
   my $sep = $_[1];
   my $re = (defined($sep)) ? 
-    ($key_sep_value_line_re_list{$sep} // qr/^(.+?)\s*+$sep\s*+([^\n]*+)\n/amsx) :
+    ($key_sep_value_line_re_list{$sep} // qr/^(.+?)\s*+$sep\s*+(\N*+)\n/amsx) :
       $key_anysep_value_line_re;
   
   while ($_[0] =~ /$re/oamsxgc) {

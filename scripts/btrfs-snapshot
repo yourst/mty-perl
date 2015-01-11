@@ -46,70 +46,80 @@ my $subvolume = undef;
 my $snapshot_name = undef;
 my $force_create_snapshots_dir = 0;
 my $delete_snapshot = undef;
+my $list_subvols = 0;
+my $list_snapshots = 0;
+my $diff = 0;
 
 my %command_line_options = (
   'backups' => [ \$max_backup_count, OPTION_VALUE_REQUIRED, [ 'n' ] ],
   'backup' => [ \$max_backup_count, OPTION_ASSIGN_BOOL, [ 'b' ], 1, 0 ],
   'force' => [ \$force_create_snapshots_dir, 0, [ 'f' ] ],
-  'subvolume' => [ \$subvolume, OPTION_VALUE_REQUIRED, [ 'subvol', 'sub', 'volume', 'vol', 'v' ] ],
-  'snapshot' => [ \$snapshot_name, OPTION_VALUE_REQUIRED, [ 'ss', 's' ] ],
-  'delete' => [ \$delete_snapshot, OPTION_VALUE_REQUIRED, [ 'd', 'del', 'destroy', 'remove', 'rm', 'r' ] ]
+  'subvolume' => [ \$subvolume, OPTION_VALUE_REQUIRED, [qw(subvol sub volume vol v)] ],
+  'snapshot' => [ \$snapshot_name, OPTION_VALUE_REQUIRED, [qw(ss s)] ],
+  'delete' => [ \$delete_snapshot, OPTION_VALUE_REQUIRED, [qw(d del destroy remove rm r)] ],
+  'list-subvols' => [ \$list_subvols, 0, [ 'lsvols' ], ],
+  'list-snapshots' => [ \$list_snapshots, 0, [ qw(l ls lssnap) ], ],
+  'diff' => [ \$diff, OPTION_VALUE_REQUIRED, [ qw(list-changes lschanges changes lsdiff) ], ],
 );
 
-sub show_help {
-  my $help =
-    $C.$U.'Syntax:'.$X.NL.
-    NL.
-    '  '.$C.'btrfs-snapshot '.$K.'['.$Y.'-option'.$K.'...] '.
-    $K.'<'.$Y.'/path/of/subvolume'.$K.'> [<'.$G.'SnapshotName'.$K.'>]'.$X.NL.
-    NL.
-    'Creates a snapshot of subvolume '.$Y.'/path/of/subvolume'.$X.' in '.$Y.$U.'/path/of/subvolume'.$UX.$G.'/.snapshots/'.$G.$U.'SnapshotName'.$X.NL.
-    'or if no snapshot name is specified, the current time and date will be used to generate a default'.NL.
-    'snapshot name of the form '.format_quoted($Y.'snapshot-'.$G.'YYYYMMDD-HHMMSS').'.'.NL.
-    NL.
-    $C.$U.'Options:'.$X.NL.
-    NL.
-    $Y.'  -backups '.$G.'N'.$K.':    '.$X.'Assuming the base snapshot name is '.format_quoted($G.'SnapshotName').', '.$Y.'-backups'.$X.' maintains'.NL.
-    '                 a queue of at most '.$G.'N'.$X.' chronologically ordered backups named'.NL.
-    '                 e.g. '.$G.'SnapshotName'.$Y.'.2014-01-01-12:00:00'.$X.' (i.e. using the actual timestamp'.NL.
-    '                 of when that snapshot was created.'.NL.
-    NL.
-    '                 Whenever a new snapshot is created, the oldest snapshot in'.NL.
-    '                 the queue is deleted if N snapshots already exist. The new'.NL.
-    '                 snapshot is then created using the X.datestamp naming scheme'.NL.
-    '                 above, and the base name (e.g. '.format_quoted($G.'SnapshotName').') is then symlinked to '.NL.
-    '                 this newly created snapshot. This approach makes the entire'.NL.
-    '                 process atomic since it never renames subvolumes.'.NL.
-    NL.
-    $Y.'  -backup        '.$X.'Equivalent to '.format_quoted($Y.'-backups 1').NL.
-    NL.
-    $Y.'  -force         '.$X.'If the '.$Y.'/path/of/subvolume/.snapshots'.$X.' directory does not exist,'.NL.
-    '                 it will automatically be created.'.NL.
-    NL.
-    $Y.'  -delete '.$G.'/name'.$K.': '.$X.'Delete the specified snapshot (by its full path name)'.NL.
-    '                 (For safety reasons, this command intentionally only allows deleting snapshots;'.NL.
-    '                 use '.format_quoted('btrfs subvol delete').' to remove the original subvolume).'.NL.
-    NL.
-    $Y.'  -list-subvols  '.$X.'List all subvolumes (in the specified filesystem or the root by default)'.NL.
-    '                 which are actual read/write subvolumes containing a .snapshots subdirectory'.NL.
-    NL.
-    $Y.'  -list-snapshots'.$X.'List all subvolumes (in the specified filesystem or the root by default)'.NL.
-    '                 which are actual read/write subvolumes containing a .snapshots subdirectory'.NL.
-    NL;
+my @command_line_options_help = (
+  [ OPTION_HELP_SYNTAX ] => 'Syntax',
 
-    NL;
+  [ OPTION_HELP_WRAPPED ] => 'Creates a snapshot of subvolume '.Y.'/path/of/subvolume'.X.' in '.
+    Y.U.'/path/of/subvolume'.UX.G.'/.snapshots/'.G.U.'SnapshotName'.X.' '.
+    'or if no snapshot name is specified, the current time and date will '.
+    'be used to generate a default snapshot name of the form '.
+    format_quoted($Y.'snapshot-'.$G.'YYYYMMDD-HHMMSS').'.',
 
-  print(STDERR $help);
-  exit 1;
-}
+  [ OPTION_HELP_CATEGORY ] => 'Commands and Actions', 
+
+  [ OPTION_HELP_DEFAULT ] => 'Creates a new snapshot named according to the required -snapshot option',
+
+  'delete' =>   'Delete the specified snapshot (by its full path name). For safety reasons, this '.
+                'command intentionally only allows deleting snapshots; use "btrfs subvol delete" '.
+                'to remove the original subvolumes.',
+
+  'list-subvols' => 'List all subvolumes (in the specified filesystem or the root by default) '.
+                    'which are actual read/write subvolumes containing a .snapshots subdirectory',
+
+  'list-snapshots' => 'List all snapshots as a tree, with a main branch for each enabled subvolume, '.
+                      'sub-branches for the snapshot types or labels defined for the subvolume, and '.
+                      'leaf nodes with the snapshot timestamp',
+
+  'diff' => 'Based on the specified snapshot, list the files, directories and any other filesystem '.
+            'objects or inodes in the snapshot\'s corresponding live subvolume which have been added, '.
+            'deleted, modified or have updated attributes since the snapshot was created. (BtrFS can '.
+            'execute this query extraordinarily quickly thanks to its internal data structures).',
+
+  [ OPTION_HELP_CATEGORY ] => 'Backup Count and Rotation',
+
+  'backups' => 'Assuming the base snapshot name is "SnapshotName", -backups maintains '.
+               'a queue of at most '.G.'N'.X.' chronologically ordered backups named '.
+               'e.g. '.G.'SnapshotName'.Y.'.2014-01-01-12:00:00'.X.' (i.e. using the '.
+               'actual timestamp of when that snapshot was created.'.NL.
+               NL.
+               'Whenever a new snapshot is created, the oldest snapshot in '.
+               'the queue is deleted if N snapshots already exist. The new '.
+               'snapshot is then created using the X.datestamp naming scheme '.
+               'above, and the base name (e.g. '.format_quoted($G.'SnapshotName').') '.
+               'is then symlinked to this newly created snapshot. This approach '.
+               'makes the entire process atomic since it never renames subvolumes.'.NL,
+
+  'backup' =>   'Equivalent to "-backups 1"',
+
+  [ OPTION_HELP_CATEGORY ] => 'Additional Options',
+
+  'force' =>    'If the '.Y.'/path/of/subvolume/.snapshots'.X.' directory does not exist, '.
+                'it will automatically be created.',
+);
 
 sub print_progress($) {
-  print(STDERR $G.' '.checkmark.' '.$_[0].NL);
+  printfd(STDERR, $G.' '.checkmark.' '.$_[0].NL);
 }
 
-print(STDERR print_banner($Y.'btrfs-snapshot', $R.'BtrFS snapshot creation, rotation, querying and management utility', $Y).NL);
+printfd(STDERR, print_banner($Y.'btrfs-snapshot', $R.'BtrFS snapshot creation, rotation, querying and management utility', $Y).NL);
 
-my ($args, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, \&show_help);
+my ($args, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
 
 my ($subvolume_arg, $snapshot_name_arg) = @$args;
 
@@ -131,7 +141,8 @@ if (defined $delete_snapshot) {
   $subvolume = $delete_snapshot;
 } elsif (!defined $subvolume) {
   # warn("No subvolume name specified.");
-  show_help();
+  print_command_line_options_help(%command_line_options, @command_line_options_help);
+  exit 0;
 }
 
 $subvolume = realpath($subvolume);
@@ -166,7 +177,7 @@ if (! -d $snapshots_dir) {
     make_path($snapshots_dir) 
       || die('Cannot create directory '.$snapshots_dir);
   } else {
-    print($G.$snapshots_dir.$X.' does not exist: '.
+    prints($G.$snapshots_dir.$X.' does not exist: '.
           'skipping snapshot of subvolume '.$Y.$subvolume.$X.NL);
     exit 0;
   }
@@ -232,7 +243,7 @@ if ($max_backup_count > 0) {
                    $K.' with generation '.$G.$oldest_gen);
 
   if ($existing_snapshot_count <= $max_backup_count) {
-    print(STDERR $R.' '.x_symbol.' '.$Y.'Skipping removal of oldest snapshot'.$K.
+    printfd(STDERR, $R.' '.x_symbol.' '.$Y.'Skipping removal of oldest snapshot'.$K.
           ', since there were only '.$G.$existing_snapshot_count.$K.' out of '.
           $G.$max_backup_count.$K.' snapshots'.$X.NL);
   } else {

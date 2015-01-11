@@ -292,7 +292,7 @@ sub print_extents(+) {
     ALIGN_LEFT, ALIGN_LEFT
   );
   
-  print($outfd format_table(@table, colseps => '  ', row_prefix => '  ', align => @alignments));
+  printfd($outfd, format_table(@table, colseps => '  ', row_prefix => '  ', align => @alignments));
   
   return \@table;
 }

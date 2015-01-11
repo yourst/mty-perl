@@ -43,7 +43,7 @@ if ($settings =~ /\b (nocolor|off|disable)/oamsx) {
 # we're writing to something that's not a tty, don't do color.
 if (! -t STDERR || ($terminal eq 'dumb') || $disabled) {
   while (<STDIN>) {
-    print(STDERR $_);
+    printfd(STDERR, $_);
   }
   exit 0;
 }
@@ -129,7 +129,7 @@ sub highlight_cxx_syntax($$) {
 
   if ($token =~ /$cxx_token_re/oamsxg) {
     my $type = $REGMARK;
-    # print(STDERR "[tok=$token, type=".($type//'<?>')."]\n");
+    # prints(STDERR "[tok=$token, type=".($type//'<?>')."]\n");
     my $color = $cxx_token_types_to_highlighting_colors{$type} // $X;
     if ($type == CXX_TOKEN_IDENTIFIER) {
       $color = (exists $cxx_keywords{$token}) ? $W.$U : $Y;
@@ -225,19 +225,19 @@ while (<STDIN>) {
   my $lines = ($out =~ tr/\n//);
 
   if (($lines_printed_so_far + $lines) < $max_error_lines) {
-    print(STDERR $out);
+    printfd(STDERR, $out);
     $lines_printed_so_far += $lines;
   } elsif (!$passed_max_error_lines) {
     $passed_max_error_lines = 1;
     my $starbar = $Y.' '.star.' '.star.' '.star.' ';
-    print(STDERR $R.(' ' x 10).$starbar.$R.
+    printfd(STDERR, $R.(' ' x 10).$starbar.$R.
           "  Too many lines of errors and/or warnings ($lines_printed_so_far); suppressing remaining errors  ".
           $Y.' '.$starbar.$R.(' ' x 10).$X."\n");
   }
 }
 
 if ($lines_printed_so_far > 0) {
-  print(STDERR "\n");
+  printfd(STDERR, "\n");
 }
 
 exit 0;

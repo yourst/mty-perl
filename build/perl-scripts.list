@@ -1,5 +1,6 @@
 autogen-reverse-dns-and-dhcp
 btrfs-snapshot
+check-ext-deps
 colorize-command-line
 colorize-gcc
 colorize-make
@@ -12,6 +13,7 @@ intersect
 iwscan
 lls
 local-lvs-and-devs-to-iscsi-targets
+lsdeps
 lslv
 lsopen
 makeanalyzer

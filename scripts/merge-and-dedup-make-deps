@@ -9,8 +9,8 @@ use integer; use warnings;
 my $filter_by_target_suffix = $ARGV[0]) ? quotemeta($ARGV[0]) : '\.[^\:\s]+');
 my $output_target_filename = $ARGV[0];
 #my $target_and_deps_re = qr/^([^\:\.\s]++ (?: $filter_by_target_suffix)? ) \s*+ \: \s*+ (.*+)$/oax;
-my $target_and_deps_re = qr/^([^\:]++) \: \s*+ ([^\n]*+) \n/oamsx;
-#my $target_and_deps_re = qr/^([^\n]++) \n/oamsx;
+my $target_and_deps_re = qr/^([^\:]++) \: \s*+ (\N*+) \n/oamsx;
+#my $target_and_deps_re = qr/^(\N++) \n/oamsx;
 my $dep_list_re = qr/\G (?: \.\/)? (\S++) (?: \Z | \s++)/oamsx;
 
 sub read_stdin { local $/; return <STDIN>; }
@@ -19,11 +19,11 @@ my $in = read_stdin();
 my @ordered_deps = ( );
 my %existing_deps = ( );
 
-#print("in = [$in]\n");
+#prints("in = [$in]\n");
 
 while ($in =~ /$target_and_deps_re/oamsxg) {
   my ($target, $deps) = ($1, $2);
-  print("process target [$target] deps [$deps]:\n");
+  prints("process target [$target] deps [$deps]:\n");
   while ($deps =~ /$dep_list_re/oamsxg) {
     my $f = $1;
     next if ($f =~ m{^[=:/]}oax);
@@ -44,4 +44,4 @@ my $out = $output_target.':';
 foreach my $dep (@ordered_deps) { $out .= ' '.$dep; }
 $out .= "\n";
 
-print($out);
+prints($out);

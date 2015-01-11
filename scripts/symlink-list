@@ -14,10 +14,10 @@ my $dry_run = 0;
 my $preserve_existing_links = 0;
 
 my %command_line_options = (
-  'reverse' => [ \$reverse_order, ['r', 'rev', 'link-then-target'] ],
+  'reverse' => [ \$reverse_order, [qw(r rev link-then-target)] ],
   'verbose' => [ \$verbose, ['v'] ],
   'preserve' => [ \$preserve_existing_links, ['p'] ],
-  'dry-run' => [ \$dry_run, ['dryrun', 'test'] ],
+  'dry-run' => [ \$dry_run, [qw(dryrun test)] ],
 );
 
 my ($filename_pairs, $invalid_args) = parse_command_line(%command_line_options, @ARGV);
@@ -51,9 +51,9 @@ foreach (@$filename_pairs) {
     if ((-l $to) && (!$preserve_existing_links)) { unlink($to); }
     if (!$dry_run) {
       if (!symlink($from, $to)) { 
-        print(STDERR 'Warning: cannot symlink "'.$from.'" to "'.$to.'" ('.$!.')'.NL); next; 
+        printfd(STDERR, 'Warning: cannot symlink "'.$from.'" to "'.$to.'" ('.$!.')'.NL); next; 
       }
     }
-    if ($verbose) { print($from.' -> '.$to.NL); }
+    if ($verbose) { prints($from.' -> '.$to.NL); }
   }
 }

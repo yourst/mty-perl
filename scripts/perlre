@@ -38,8 +38,6 @@ use MTY::RegExp::Strings;
 use MTY::RegExp::CxxREs;
 use MTY::RegExp::PerlSyntax;
 
-use Data::Printer;
-
 #use File::Find;
 
 $DEBUG = 0;
@@ -107,7 +105,7 @@ my $error_messages = '';
 sub show_error_and_exit {
   my ($message) = @_;
   $message = $R.x_symbol.'  '.$R.$U.'ERROR:'.$X.$Y.' '.$message.$X.NL;
-  print(STDERR text_in_a_box($message, -1, $R, 'heavy'));
+  printfd(STDERR, text_in_a_box($message, -1, $R, 'heavy'));
   $error_messages .= $message;
   $invalid_args = 1;
 }
@@ -115,7 +113,7 @@ sub show_error_and_exit {
 sub show_warning {
   my ($message) = @_;
   $message = $R.warning_sign.'  '.$R.$U.'Warning:'.$X.$Y.' '.$message.$X.NL;
-  print(STDERR text_in_a_box($message, -1, $M, 'rounded'));
+  printfd(STDERR, text_in_a_box($message, -1, $M, 'rounded'));
   $error_messages .= $message;
   $invalid_args = 1;
 }
@@ -354,7 +352,7 @@ $show_colorized_compiled_regexps = $is_colorize;
 sub show_predef_regexps {
   my @renames = sort(keys %compiled_regexps);
 
-  print(STDOUT NL.text_in_a_box($C.'Predefined Regular Expressions:', 
+  printfd(STDOUT, NL.text_in_a_box($C.'Predefined Regular Expressions:', 
                                 0, $B, undef, 
                                 undef, ' ', 76).
         '  '.$Y.$U.'perlre includes '.$C.scalar(@renames).
@@ -367,9 +365,9 @@ sub show_predef_regexps {
     short_list_compiled_regexps();
     list_compiled_regexps();
   }
-  print(STDOUT NL);
+  printfd(STDOUT, NL);
   show_compiled_regexps(\%compiled_regexps, $regexp_name_list, $list_formatted_regexps);
-  print(STDOUT NL);
+  printfd(STDOUT, NL);
 }
 
 if ($is_list_regexps) {
@@ -381,16 +379,16 @@ sub show_command_line_options {
   my $fd = $_[0] // STDERR;
 
   if (is_there($error_messages)) {
-    print($fd text_in_a_box($error_messages, -1, $R, 'rounded'));
-    print($fd NL);
+    printfd($fd, text_in_a_box($error_messages, -1, $R, 'rounded'));
+    printfd($fd, NL);
   }
-  print($fd $C.$U.'Command line options were:'.$X.NL);
-  print($fd NL);
+  printfd($fd, $C.$U.'Command line options were:'.$X.NL);
+  printfd($fd, NL);
   for ($i = -1; $i < scalar(@ARGV); $i++) {
     my $arg = ($i >= 0) ? $ARGV[$i] : $0;
-    print($fd '  '.$B.'['.($i+1).']'.$X.' '.$arg.NL);
+    printfd($fd, '  '.$B.'['.($i+1).']'.$X.' '.$arg.NL);
   }
-  print($fd NL);
+  printfd($fd, NL);
 }
 
 sub format_help_tab($) {
@@ -407,7 +405,7 @@ if ($invalid_args) {
 
   my $help;
 
-  print($helpfd print_banner($G.'perlre', 
+  printfd($helpfd, print_banner($G.'perlre', 
                              $Y.'Perl regular expression matching, substitution and more', $B));
 
   $help = q{
@@ -500,7 +498,7 @@ if ($invalid_args) {
   (prints e.g. aaa XXX bbb YYY' where XXX and YYY are strings extracted from each line in stdin)
 
 !Evaluation example:
-  <EX>nm modulename.ko | perlre -e "\s+U\s+(\w+)\$" 'print("$1\n") if (`fgrep -c __ksymtab_$1 /proc/kallsyms` eq "0\n");'</EX>
+  <EX>nm modulename.ko | perlre -e "\s+U\s+(\w+)\$" 'prints("$1\n") if (`fgrep -c __ksymtab_$1 /proc/kallsyms` eq "0\n");'</EX>
   (actually executes commands in xargs fashion)
 
 !Substitution example:
@@ -517,18 +515,18 @@ if ($invalid_args) {
 };
 
   # Convert the simple help formatting codes and rules into ANSI color codes:
-  $help =~ s{\!([^\n]+)\n}{format_help_tab($1)}oamsxge;
+  $help =~ s{\!(\N+)\n}{format_help_tab($1)}oamsxge;
   $help =~ s{\s\K(\-[\w\-\=]+)(?=[\s\,])}{$Y$1$X}oamsxg;
   $help =~ s{(\$\S)}{$G$1$X}oamsxg;
   $help =~ s{perlre}{${G}perlre${X}}oamsxg;
 
-  print($helpfd $help);
+  printfd($helpfd, $help);
 
-  print($helpfd NL.text_in_a_box($G.'E X A M P L E S', 0, $B, 'double', undef, (' ' x 20), 40));
+  printfd($helpfd, NL.text_in_a_box($G.'E X A M P L E S', 0, $B, 'double', undef, (' ' x 20), 40));
 
-  $examples =~ s/\!([^\n]+)\n/$Y$U$1$X\n/gms;
+  $examples =~ s/\!(\N+)\n/$Y$U$1$X\n/gms;
   $examples =~ s/\<EX\>(.+?)\<\/EX\>/$G$1$X/gms;
-  print($helpfd $examples);
+  printfd($helpfd, $examples);
 
   show_command_line_options($helpfd);
 
@@ -562,8 +560,15 @@ sub subst_builtin_regexp($) {
 }
 
 if ($is_pattern_regexp) { 
-  $regexp =~ s[\$\{?(\w+?_re)\}?]
-              [subst_builtin_regexp($1)]oamsge;
+  $regexp =~ s[\$ (?| (?> \{ (\w+? _re) \}) | (?> (\w+? _re)))]
+              [subst_builtin_regexp($1)]oamsxge;
+  #
+  # replace "\q" with single quote (') to make it easier to specify
+  # single quotes nested within single quoted command line arguments,
+  # since bash and similar shells don't allow escaped quotes (\')
+  # within single quotes (this annoying quirk remains unexplained).
+  #
+  $regexp =~ s{\\ q}{'}oamsxg;
 } else {
   $regexp = quotemeta($regexp);
   $capture_group_count = 0;
@@ -600,18 +605,18 @@ if (defined($die_error_message)) {
 }
 
 if ($is_explain_regexp) {
-  print(STDOUT NL);
+  printfd(STDOUT, NL);
   show_compiled_regexp('(regexp)', $regexp);
   exit 0;
 }
 
 if ($is_optimize_regexp) {
-  print(STDOUT NL.$G.$U.'Regular expression as specified (before optimization):'.$X."\n\n");
+  printfd(STDOUT, NL.$G.$U.'Regular expression as specified (before optimization):'.$X."\n\n");
   show_compiled_regexp('(regexp before)', $regexp);
 
   $optimized_regexp = Regexp::Optimizer->new->optimize($regexp);
 
-  print(STDOUT NL.$G.$U.'Regular expression after optimization:'.$X."\n\n");
+  printfd(STDOUT, NL.$G.$U.'Regular expression after optimization:'.$X."\n\n");
   show_compiled_regexp('(regexp after)', $optimized_regexp);
   exit 1;
 }
@@ -637,7 +642,7 @@ if ($is_split) {
   $format = '{ $k=$1; $v=$2; $k =~ s/\s/_/g; $k =~ s/\W//g; ';
   $format .= '$k = uc($k); ' if ($is_key_uppercase);
   $format .= '$k = lc($k); ' if ($is_key_lowercase);
-  $format .= 'print("' . $preform . '"); }';
+  $format .= 'prints("' . $preform . '"); }';
   $format_specified = 1;
 } elsif (!defined($format)) {
   #
@@ -686,7 +691,7 @@ my $special_formats_re =
 
 sub replace_special_format {
   my ($format_code, $capture_group_name) = @_;
-  #print(STDERR "$RED >>> replace_special_format(fc [$format_code], cgn [$capture_group_name]) <<<$NOCOLOR\n");
+  #prints(STDERR "$RED >>> replace_special_format(fc [$format_code], cgn [$capture_group_name]) <<<$NOCOLOR\n");
 
   if (is_filled($capture_group_name)) {
     return ('$+{'.$capture_group_name.'}');
@@ -792,13 +797,13 @@ if ($DEBUG) {
   if ($is_string) {
     $status .= Y.'string'.K.' = '.format_quoted(G.$string).NL;
   }
-  print(STDERR Y.'program name'.K.' = '.format_quoted(G.$0).NL);
+  printfd(STDERR, Y.'program name'.K.' = '.format_quoted(G.$0).NL);
   if ($is_filelist) {
     $status .= Y.U.'Filename list ('.(scalar @filelist).' files):'.NL;
     foreach $filename (@filelist) { $status .= K.' '.dot.' '.X.$filename.NL; }
   }
 
-  print(STDERR text_in_a_box($status));
+  printfd(STDERR, text_in_a_box($status));
 }
 
 if (!$is_eval) {
@@ -845,7 +850,7 @@ sub process_file {
     }
   }
 
-  # print(STDERR "Processing $filename -> $outfile:\n") if ($is_verbose);
+  # prints(STDERR "Processing $filename -> $outfile:\n") if ($is_verbose);
 
   #
   # If we're asked to consider the entire input like a single line,
@@ -868,7 +873,7 @@ sub process_file {
   L: while (<$IN>) {
       study($_) if (length($_) >= 1024);
       my $m = ($_ =~ s{$regexp}{$origmatch = substr($_, $-[0], $+[0] - $-[0]); $format}gee);
-      print($OUT $_);
+      printfd($OUT, $_);
       $matches += $m; last L if ($matches >= $matching_line_count_limit);
     }
     if (!$is_stdout) {
@@ -886,12 +891,12 @@ sub process_file {
         ($ok ? $c : $k).padstring($filename, $max_filename_length).
         ' '.($ok ? $g.arrow_tri : $r.arrow_open_tri).' '.($ok ? ($g.padstring($matches, -4).$y.
         ' replacements') : ($r.(' ' x 4).' no matches')).$x.NL;
-      if ($ok) { print(STDERR $s); }
+      if ($ok) { printfd(STDERR, $s); }
     }
   } else { # not $is_subst (i.e. regular matching without substitution)
   L: while (<$IN>) {
       chomp;
-      # if ($DEBUG) { print(STDERR $K.'['.$B.'line '.$Y.$linenum.$K.': '.
+      # if ($DEBUG) { prints(STDERR $K.'['.$B.'line '.$Y.$linenum.$K.': '.
       #                    $Y.length($_).$B.' chars = '.$K.left_quote.
       #                    $G.$_.$K.right_quote.']'.$X.NL); }
       study($_) if (length($_) >= 1024);
@@ -906,11 +911,11 @@ sub process_file {
 
       if ($is_invert) {
         if (!/$regexp/g) {
-          print($OUT "$_\n");
+          printfd($OUT, "$_\n");
           $matches++;
         }
       } else {
-        #print(STDERR $R.'Match line '.format_quoted($G.$_).' against regexp '.
+        #prints(STDERR $R.'Match line '.format_quoted($G.$_).' against regexp '.
         #format_quoted($C.$regexp).$R.':'.$X.NL);
         while (/$regexp/gc) {
           if ($format_uses_special_vars) {
@@ -922,22 +927,22 @@ sub process_file {
             eval $format; 
           } else {
             if ($is_show_filenames && (!$already_printed_filename)) {
-              print(STDERR $B.' '.checkmark.' '.$Y.
+              printfd(STDERR, $B.' '.checkmark.' '.$Y.
               padstring($sourcename, $max_filename_length).$K.' @ '.$M.
               padstring($linenum, 5).$B.' '.arrow_head.' '.$X);
               if ($is_show_filenames_at_top) {
                 $already_printed_filename = 1;
-                print(STDERR NL);
+                printfd(STDERR, NL);
               }
             }
             
             if ($is_colorize && ($capture_group_count > 0) && $is_full_lines) {
               my $s = $origline;
               $s =~ s/$regexp/$match_color.(eval $format).$non_match_color/ge;
-              print($STDERR $non_match_color.$s.X.NL);
+              printfd($STDERR, $non_match_color.$s.X.NL);
             } else {
               my $s = (eval $format) // '';
-              print($OUT $s);
+              printfd($OUT, $s);
             }
           }
           $matches++;
@@ -976,7 +981,7 @@ sub process_string {
 
   if ($is_subst) {
     $matches = ($string =~ s/$regexp/$format/gee);
-    print($string);
+    prints($string);
   } else { # not $is_subst (i.e. regular matching without substitution)
     L: while ($string =~ /$regexp/g) {
       if ($format_uses_special_vars) {
@@ -985,7 +990,7 @@ sub process_string {
         my $matchstr = substr($string, $startpos, $matchlen);
       }
       my $startpos = $-[0]; my $endpos = $+[0]; my $matchlen = $endpos - $startpos;
-      if ($is_eval) { eval $format; } else { print(eval $format); }
+      if ($is_eval) { eval $format; } else { prints(eval $format); }
       $matches++; last L if ($matches >= $matching_line_count_limit);
     }
   } # end if regular matching
@@ -997,7 +1002,7 @@ $total_matches = 0;
 
 if ($is_stdio) {
   $total_matches = process_file('/dev/stdin', '/dev/stdout');
-  print(STDERR $G.$total_matches.' total matches'.$X.NL) if ($is_verbose);
+  printfd(STDERR, $G.$total_matches.' total matches'.$X.NL) if ($is_verbose);
 } elsif ($is_filelist) {
   my $fileid = 0;
   $max_filename_length = maxlength(@filelist);
@@ -1032,11 +1037,11 @@ if ($is_stdio) {
         if (!(defined $subst_output_dir_prefix)) {
           if ($backup_before_subst) {
             rename($filename, $backupfile) || 
-            print("perlre: Warning: cannot rename $filename to $backupfile\n");
+            prints("perlre: Warning: cannot rename $filename to $backupfile\n");
           }
           if ($overwrite_with_subst) {
             rename($outfile, $filename) || 
-              print("perlre: Warning: cannot replace $filename with $outfile (left $outfile in place)\n");
+              prints("perlre: Warning: cannot replace $filename with $outfile (left $outfile in place)\n");
           }
         }
       } else {
@@ -1052,13 +1057,13 @@ if ($is_stdio) {
   }
 
   if ($is_verbose) {
-    print("$total_matches total ".($is_subst ? "replacements" : "matches").
+    prints("$total_matches total ".($is_subst ? "replacements" : "matches").
           " in ".(scalar @filelist)." files\n")
   }
 } elsif ($is_string) {
   my $stringid = 0;
   $total_matches = process_string($string, $stringid);
-  print(STDERR $G.$total_matches.' total matches'.$X.NL) if ($is_verbose);
+  printfd(STDERR, $G.$total_matches.' total matches'.$X.NL) if ($is_verbose);
   $stringid++;
 }
 

@@ -17,7 +17,7 @@ foreach $arg (@ARGV) {
     $cpu = $1;
     $include_all_cpus = 0;
     $include_cpu[$cpu] = 1;
-    # print("include cpu $cpu\n");
+    # prints("include cpu $cpu\n");
   } elsif (($exclude, $key) = ($arg =~ /^(-?)(\w+)$/)) {
     $key = lc($key);
     $include = ($exclude ne '-');
@@ -25,7 +25,7 @@ foreach $arg (@ARGV) {
     $include_all_keys = 0 if ($include);
     $include_key{$key} = 1 if ($include);
     $exclude_key{$key} = 1 if ($exclude);
-    # print("include for $key = [$include], include_all_keys = $include_all_keys\n");
+    # prints("include for $key = [$include], include_all_keys = $include_all_keys\n");
   }
 }
 
@@ -50,9 +50,9 @@ while (<F>) {
     }
     next if (!($include_all_cpus || $include_cpu[$cpu]));
     $include = ($include_all_keys || exists($include_key{$key})) && (!exists($exclude_key{$key}));
-    #print("cpu${cpu}_${key} = $include\n");
-    print('cpu' . $cpu . '_' . $key . "='" . $value . "'\n") if ($include);
+    #prints("cpu${cpu}_${key} = $include\n");
+    prints('cpu' . $cpu . '_' . $key . "='" . $value . "'\n") if ($include);
   }
 }
 
-print("cpu_count=$cpu_count\n");
+prints("cpu_count=$cpu_count\n");

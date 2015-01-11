@@ -1,26 +1,24 @@
 #!/usr/bin/perl -w
 # -*- cperl -*-
 #
-# MTY::Filesystem::PathCache
+# MTY::Filesystem::AccessibleCache
 #
-# Cache the results of resolving relative paths to absolute physical
-# paths (without symlinks, '.' or '..' references), and the results
-# of path existence checks.
+# Cache the results of checking whether a given relative path refers to a
+# file that actually exists and is accessible to the current user for
+# reading, writing, execution or merely existence. This is a lighter
+# weight query than the PathCache package, which also resolves the
+# absolute path of the target rather than merely checking if that
+# target (whatever it is) is in fact accessible, as this package does.
 #
 # Copyright 2014 Matt T. Yourst <yourst@yourst.com>
 #
 
-package MTY::Filesystem::PathCache;
+package MTY::Filesystem::AccessibleCache;
 
 use integer; use warnings; use Exporter::Lite;
 
 preserve:; our @EXPORT = 
-  qw(resolve_path resolve_directories_in_path resolve_and_open_path
-     path_exists flush_path_cache dump_path_cache resolve_uncached_path
-     is_absolute_path filename_of directory_of split_dir_and_filename
-     strip_last_path_component path_only_contains_filename
-     normalize_trailing_slash strip_trailing_slash last_path_component_of
-     realpath abs_path fast_abs_path follow_symlinks_in_path);
+  qw(path_exists path_is_accessible path_is_readable path_is_writable path_is_executable);
 
 use MTY::System::POSIX;
 use MTY::Common::Common;
@@ -30,164 +28,47 @@ use MTY::Common::Cache;
 use MTY::RegExp::FilesAndPaths;
 use MTY::Filesystem::FileStats;
 use MTY::Filesystem::CurrentDir;
+use MTY::Filesystem::PathCache;
 
-#
-# The Cwd::realpath function is only used as a fallback for resolving
-# symlinks found in /proc/*/fd/<fd> which refer to non-mountable
-# special inode namespaces. See comments about this in path_cache_fill() 
-# below for more information:
-#
-use Cwd ( );
-#pragma end_of_includes
-
-#
-# $abspath = resolve_uncached_path($relative_path, $extra_open_path_flags) ... or:
-# ($fd, $abspath) = resolve_and_open_uncached_path($relative_path, $extra_open_path_flags)
-#
-# Resolve the absolute physical path (without any symlinks, . or ..)
-# of the specified path, which may be relative or contain symlinks.
-#
-# Optionally takes a base fd of the base directory as its second 
-# argument; otherwise assumes the path is either absolute or relative
-# to the current directory.
-#
-# This is roughly 2x to 3x faster than the libc and/or perl native
-# implementation of realpath, which starts at the root and traverses
-# each directory comprising the path, following any symlinks until
-# they reach a real file or directory. Each step for each directory
-# requires several system calls which must be done strictly in order.
-#
-# In contrast, this function simply asks the kernel for the final 
-# absolute path, since the kernel obviously already knows this and 
-# can return it much faster than any userspace function can redo
-# this work without the benefit of direct access to the kernel's
-# directory and inode caches.
-#
-# Specifically, this function opens a file descriptor for the
-# specified path itself using the O_PATH flag (which skips the
-# slower process of actually preparing to access the file's data).
-# It then simply reads the symlink target of /proc/self/fd/<path-fd>,
-# through which the kernel conveniently provides the real path of
-# any file descriptor. This requires only three system calls for
-# the entire path (rather than for every directory in it):
-#
-# 1. <fd> = open(<target>, O_PATH)
-# 2. <real_path_of_target> = readlinkat("/proc/self/fd/", "<fd>")
-# 3. close(<fd>)
-#
-# As a companion function to resolve_uncached_path(), the 
-# resolve_and_open_uncached_path() function returns a pair 
-# of the form:
-#
-#   (O_PATH file descriptor for path, 
-#    full path of first argument),
-#
-# which is often a convenient compound operation, since the O_PATH
-# file descriptor needs to be opened anyway.
-#
-
-our $resolve_uncached_path_count = 0;
-our $resolve_uncached_path_fast_count = 0;
-
-sub is_absolute_path($) {
-  my ($path) = @_;
-  return ($path =~ $absolute_path_re) ? 1 : 0;
-}
-
-sub last_path_component_of($) {
-  my ($path) = @_;
-  my ($name) = ($_[0] =~ /($last_path_component_re)/oamsx);
-  return $name;
-}
-
-sub filename_of($) {
-  my ($path) = @_;
-  my ($name) = ($_[0] =~ /($filename_in_path_re)/oamsx);
-  return $name;
-}
-
-sub directory_of($) {
-  my ($result) = ($_[0] =~ /$directory_in_path_re/oamsx);
-  if (!is_there($result)) { $result = '.'; };
-  return $result;
-}
-
-sub split_dir_and_filename($) {
-  if ($_[0] =~ /$directory_and_filename_re/oamsx) {
-    return ((is_there($1) ? $1 : './'), $2);
-  } else {
-    return ( );
-  }
-}
-
-sub strip_last_path_component($) {
-  my ($path) = @_;
-  $path =~ s{$strip_last_path_component_re}{}oamsx;
-  return $path;
-}
-
-sub path_only_contains_filename($) {
-  return ($_[0] =~ /$filename_without_leading_directories_re/oamsx) ? 1 : 0;
-}
-
-our $trailing_slash_re = qr{/++$}oax;
-
-sub normalize_trailing_slash($;$) {
-  my ($dirlist, $suffix) = @_;
-
-  $suffix //= '/';
-
-  if (is_array_ref($dirlist)) {
-    my @out = map { ($_ =~ s{$trailing_slash_re}{}roax).$suffix; } @$dirlist;
-    return (wantarray ? @out : \@out);
-  } else {
-    return ($dirlist =~ s{$trailing_slash_re}{}roax).$suffix;
-  }
-}
-
-sub strip_trailing_slash {
-  return normalize_trailing_slash($_[0], '');
-}
-
-my $proc_pid_fd_or_deleted_symlink_target_re = 
-  qr{(?>
-       (?> \A \w++ : \[?+ \w++ \]?+) |
-       (?> \s \(deleted\) \Z)
-     )}oamsx;
-
-sub resolve_uncached_path($;$$) {
-  my ($relative_path, $base_dir_fd, $follow_final_symlink) = @_;
-
-  $follow_final_symlink //= 1;
-
-  $relative_path //= '';
-  my $orig_relative_path = $relative_path;
-
-  if (!$follow_final_symlink) { $relative_path = strip_last_path_component($relative_path); }
-
-  my $path =
-    (is_absolute_path($relative_path)) ? $relative_path :
-      (($base_dir_fd // AT_FDCWD) == AT_FDCWD) ? getcwd().'/'.$relative_path :
-      path_of_open_fd($base_dir_fd).'/'.$relative_path;
-  
-  if (!$follow_final_symlink) { $path .= '/'.filename_of($orig_relative_path); }
-
-  $path = Cwd::realpath($path);
-
-  return $path;
-}
-
-noexport:; sub path_cache_fill(+$$$;$) {
+noexport:; sub accessible_cache_fill(+$$$;$) {
   my ($cache, $path_key, $relative_path, $base_dir_fd, $follow_final_symlink) = @_;
   $follow_final_symlink //= 1;
   $relative_path //= '';
 
-  $resolve_uncached_path_count++;
+  #
+  # If there is no relative path, we should check the base_dir_fd itself,
+  # yet by definition, if we already opened that target to get this fd,
+  # it must have been accessible. Since this scenario is pointless to
+  # check (and it's not even clearly defined how we should handle it),
+  # an empty relative_path isn't allowed here (unlike with the path 
+  # resolution cache, where we often just want the path of an open fd).
+  #
+  die if (!length $relative_path);
 
-  if (!length $relative_path) {
-    $base_dir_fd //= get_current_dir_fd();
-    return path_of_open_fd($base_dir_fd);
-  } elsif (is_absolute_path($relative_path)) {
+  $base_dir_fd = (is_absolute_path($relative_path)) ? undef :
+    $base_dir_fd // get_current_dir_fd();
+
+  my $base_dir_path = (defined $base_dir_fd) ? 
+    path_of_open_fd($base_dir_fd) : '';
+
+  my $combined_path = $base_dir_path.'/'.$relative_path;
+
+  $accessible_cache->get($combined_path, $relative_path, $base_dir_fd, $follow_final_symlink);
+
+  ... accessible_cache_fill():
+
+    my $flags = ((!$follow_final_symlink) ? AT_SYMLINK_NOFOLLOW : 0) | AT_EACCESS;
+
+  my $ok = faccessat($base_dir_fd, $relative_path, F_OK, $flags) ? 1 : 0; 
+  
+  return F_OK;
+}
+
+  my $base_dir_path = (is_absolute_path($relative_path)) ? '' :
+    (defined $base_dir_fd) ? path_of_open_fd($base_dir_fd) :
+    getcwd();
+    
+  if (is_absolute_path($relative_path)) {
     #
     # If the path is absolute (explicitly starts at the root), 
     # the base_dir_fd doesn't matter. Note that the path may still

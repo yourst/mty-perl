@@ -56,15 +56,13 @@ use MTY::Display::PrintableSymbolTools;
 
 use re qw(is_regexp regexp_pattern regmust regname regnames regnames_count);
 
-use Data::Printer;
-use Data::Printer { colored => 1, indent => 2, name => 'ref (loop)', deparse => 1, show_tied => 1, show_lvalue => 1, print_escapes => 1, output => 'stderr' };
 
 #
 # Perl 5.10+ Regular Expression grammar (assumes /x mode with whitespace ignored)
 #
 
 our $regexp_comment_re = compile_regexp(
-  qr{\# [^\n]*+ \n}oamsx, 'regexp_comment');
+  qr{\# \N*+ \n}oamsx, 'regexp_comment');
 
 our $regexp_any_char_re = compile_regexp(
   qr{\.}oamsx, 'regexp_any_char');
@@ -267,12 +265,12 @@ sub check_for_regexp_parse_errors($;$) {
   if ($chars_left == 0) { return 0; }
 
   if (!$suppress_parse_error_message) {
-    print(STDERR "\n\n".$Y.$U.'WARNING:'.$X.$R.' check_for_regexp_parse_error: '.
+    printfd(STDERR, "\n\n".$Y.$U.'WARNING:'.$X.$R.' check_for_regexp_parse_error: '.
           'stopped before end of input regexp pattern at offset '.$Y.$pos.$R.
           ' vs length '.$Y.$len.$R.' ('.$Y.$chars_left.$R.
           ' characters remaining)'.$X."\n");
     
-    print(STDERR $Y.$U.'Regexp was:'.$X.' '.$G.$checkmark.' '.$K.$left_quote.$G.
+    printfd(STDERR, $Y.$U.'Regexp was:'.$X.' '.$G.$checkmark.' '.$K.$left_quote.$G.
           substr($$re, 0, $pos).$R.' '.$arrow_head.' '.$X.$R.
           substr($$re, $pos).$K.$right_quote.$X."\n");
   }
@@ -308,7 +306,7 @@ sub tokenize_regexp($;$$$) {
 
     my $typename = $regexp_token_type_to_name{$type} // 'unknown';
     $subparts{$typename} = $match;
-    #print(STDERR 'type ['.$type.' => '.$typename.'] @ '.$matchpos.': "'.$match.'"'.NL);
+    #prints(STDERR 'type ['.$type.' => '.$typename.'] @ '.$matchpos.': "'.$match.'"'.NL);
     push @$array, [ $match, $type, $matchpos, length($match), \%subparts ];
     $prev_type = $type;
     $REGMARK = undef;
@@ -400,7 +398,7 @@ noexport:; sub tokenized_regexp_to_subtree {
   my @or_alternative_group_start_indexes = ( 0 );
 
   while ($token_index < (scalar @$token_list)) {
-    # print(STDERR 'token_list['.$token_index.'] = '.($token_list->[$token_index] // '<undef>').NL);
+    # prints(STDERR 'token_list['.$token_index.'] = '.($token_list->[$token_index] // '<undef>').NL);
 
     my $rec = $token_list->[$token_index++];
     my ($token, $type, $pos, $token_length, $subparts) = @$rec;
@@ -551,7 +549,7 @@ sub tokenize_regexp_to_tree($) {
   # and split off the modifiers at the same time:  
   my ($pattern, $modifiers) = get_regexp_pattern_and_modifiers($_[0]);
   my $tokens = tokenize_regexp($pattern);
-  print(STDERR "# tokens = ".scalar(@$tokens).", mods $modifiers\n");
+  printfd(STDERR, "# tokens = ".scalar(@$tokens).", mods $modifiers\n");
 
   my $tree = tokenized_regexp_to_tree($tokens, $modifiers);
   return $tree;
@@ -569,7 +567,7 @@ sub clean_up_and_optimize_regexp_parse_tree {
 
   if (($type == RE_TOKEN_EXT_GROUP_START) && ($token eq '(')) {
     if ($n == 0) {
-      print(STDERR 'Remove empty group at pos '.$pos.' (token "'.$token.'")'.NL);
+      printfd(STDERR, 'Remove empty group at pos '.$pos.' (token "'.$token.'")'.NL);
       # empty non-capturing group: we can safely delete it entirely
       return undef;
     } elsif ($n == 1) {
@@ -577,7 +575,7 @@ sub clean_up_and_optimize_regexp_parse_tree {
       my $subnode = $subnodes->[0];
       die if (!defined $subnode);
 
-      print(STDERR 'Collapse single subnode group at pos '.$pos.' (token "'.$token.'") '.
+      printfd(STDERR, 'Collapse single subnode group at pos '.$pos.' (token "'.$token.'") '.
               'by replacing with subnode at pos '.$subnode->[RE_TREE_NODE_POS].' with token '.
                 '"'.$subnode->[RE_TREE_NODE_TOKEN].'"'.NL);
 
@@ -606,8 +604,8 @@ sub dump_regexp_parse_tree {
 
   my ($type, $token, $inputpos, $subnodes, $fields, $min_quant, $max_quant, $greedyness, $groupid) = @{$node};
 
-  #print(STDERR $G.$U.'[level '.$level.']: Node @ '.$node.' = '.p($node).NL);
-  #print(STDERR 'level '.($level//'X').', type '.($type//'X').', token '.($token//'X').', pos '.($inputpos//'X').', desc '.(format_quoted($regexp_token_type_to_name{$type} // '???')).NL);
+  #prints(STDERR $G.$U.'[level '.$level.']: Node @ '.$node.' = '.p($node).NL);
+  #prints(STDERR 'level '.($level//'X').', type '.($type//'X').', token '.($token//'X').', pos '.($inputpos//'X').', desc '.(format_quoted($regexp_token_type_to_name{$type} // '???')).NL);
 
   ${$out} .= ('  ' x $level).$Y.$U.$regexp_token_type_to_name{$type}.$UX.$K.' = '.
     format_quoted($G.$token).$K.' @ '.$B.$inputpos;

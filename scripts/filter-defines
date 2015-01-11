@@ -121,7 +121,7 @@ my $default_action = INCLUDE;
 my $preprocessor_define_or_other_line_re = compile_regexp(
   \qr/\G (?: 
         (?> $preprocessor_define_re) | 
-        (?>^ ([^\n]*+) \n)
+        (?>^ (\N*+) \n)
      )/oamsx,
   'preprocessor_define_or_other_line');
 
@@ -132,18 +132,18 @@ sub replace_tokens_with_macro_defs($;$$) {
   my ($filename, $symbol_name_of_def) = ($_[1], $_[2]);
 
   my ($leading_whitespace) = ($_[0] =~ /$leading_whitespace_re/oamsxgc);
-  my $line = 1 + length($leading_whitespace =~ s/[^\n]//roamsxg);
+  my $line = 1 + length($leading_whitespace =~ s/\N//roamsxg);
   
   local $REGMARK = undef;
 
   my $out = '';
 
   if ($DEBUG) {
-    print(STDERR $C.' '.arrow_head.' '.$C.$U.
+    printfd(STDERR, $C.' '.arrow_head.' '.$C.$U.
             'Replacing tokens in file '.$Y.$filename.$C);
     if (defined($symbol_name_of_def))
-      { print(STDERR ' (within definition of macro '.$Y.$symbol_name_of_def.$C); }
-    print(STDERR ' with any matching macros in line:'.$UX.X.NL.
+      { printfd(STDERR, ' (within definition of macro '.$Y.$symbol_name_of_def.$C); }
+    printfd(STDERR, ' with any matching macros in line:'.$UX.X.NL.
             $B.' '.asterisk.' '.$X.format_chunk($_[0]).$X.NL);
   }
 
@@ -166,14 +166,14 @@ sub replace_tokens_with_macro_defs($;$$) {
         my $macro_arg_list = $macro_name_to_arg_list{$token};
         if (defined $macro_arg_list) {
           if ($DEBUG) {
-            print(STDERR $R.' '.x_symbol.' '.$K.
+            printfd(STDERR, $R.' '.x_symbol.' '.$K.
                     'Functional macro expansion not yet supported on token '.
                       format_chunk($token).$K.' at offset '.
                         $G.$startpos.$X.NL);
           }
         } else {
           if ($DEBUG) {
-            print(STDERR $B.' '.checkmark.' '.$K.
+            printfd(STDERR, $B.' '.checkmark.' '.$K.
                     'Replaced token '.format_chunk($token).$K.' with '.
                       format_chunk($replacement).$K.' at offset '.
                         $G.$startpos.$X.NL);
@@ -201,7 +201,7 @@ sub replace_tokens_with_macro_defs($;$$) {
       'Remaining input after that point ('.$C.(length($_[0])-$p).
       $W.' chars):'.$X.NL.$R.$remaining.$K.'...'.$X.NL.NL.
       $W.'Parsed input up to that point:'.NL.$B.'...'.$G.$parsed_so_far.$X.NL;
-    print(STDERR $cxx_parser_error);
+    printfd(STDERR, $cxx_parser_error);
     die();
 
     return undef;
@@ -219,14 +219,14 @@ sub process_action($$$$) {
     my ($name, $macroargs, $def, $other) = ($1, $2, $3, $4);
 
     if (defined $other) {
-      if ($DEBUG) { print(STDERR $R.'[other] '.$B.$other.$X.NL); }
+      if ($DEBUG) { printfd(STDERR, $R.'[other] '.$B.$other.$X.NL); }
       if ($total_macro_defs > 0) { $other = replace_tokens_with_macro_defs($other, $filename); }
-      print(STDOUT $other.NL);
+      printfd(STDOUT, $other.NL);
       next;
     }
 
     if ($DEBUG) {
-      print(STDERR $C.$action_to_action_name{$action}.$K.' '.
+      printfd(STDERR, $C.$action_to_action_name{$action}.$K.' '.
               $K.left_quote.$G.$name.$K.right_quote.'('.$M.($macroargs // '<no macro args>').$K.')'.
                 $B.' '.arrow_barbed.' '.$K.left_quote.$Y.($def // '').$K.right_quote.$X.NL);
     }
@@ -242,14 +242,14 @@ sub process_action($$$$) {
       }
 
       if ($DEBUG) {
-        print(STDERR $B.' '.large_plus.' '.$K.'Added macro definition '.
+        printfd(STDERR, $B.' '.large_plus.' '.$K.'Added macro definition '.
                 $Y.'#'.$total_macro_defs.$K.' for '.
                   format_chunk($name).$K.' = '.format_chunk($def));
         if (defined $macroargs) {
-          print(STDERR $K.' with '.$G.scalar(@macro_arg_list).$K.' arguments: '.
+          printfd(STDERR, $K.' with '.$G.scalar(@macro_arg_list).$K.' arguments: '.
                   format_chunk($macroargs).$K.')');
         }
-        print(STDERR $X.NL);
+        printfd(STDERR, $X.NL);
       }
 
       $total_macro_defs++;
@@ -275,26 +275,26 @@ sub process_action($$$$) {
            (exists $undef_syms{$name}));
 
       if ($ok_to_undef) {
-        print(STDOUT '#undef '.$name.NL);
+        printfd(STDOUT, '#undef '.$name.NL);
       } elsif ($ok_to_include) {
         if ($DEBUG) {
-          print(STDERR $B.'OK to include: '.$K.left_quote.$G.$name.$K.right_quote.
+          printfd(STDERR, $B.'OK to include: '.$K.left_quote.$G.$name.$K.right_quote.
                   '('.$M.($macroargs // '<no args>').$K.')'.$B.' '.arrow_barbed.' '.
                     $K.left_quote.$Y.($def // '').$K.right_quote.$X.NL);
         }
 
         my $args_out = (defined $macroargs) ? ('('.$macroargs.')') : '';
         my $def_out = '#define '.$name.$args_out.' '.$def.NL;
-        print(STDOUT $def_out);
+        printfd(STDOUT, $def_out);
 
         #if ($DEBUG) {
-        #print(STDERR $B.'name     = '.$K.left_quote.$G.$name.$K.right_quote.$X.NL);
-        #print(STDERR $B.'args_out = '.$K.left_quote.$G.$args_out.$K.right_quote.$X.NL);
-        #print(STDERR $B.'def      = '.$K.left_quote.$G.$def.$K.right_quote.$X.NL);
-        #print(STDERR $B.'def_out  = '.$K.left_quote.$G.$def_out.$K.right_quote.$X.NL);
+        #prints(STDERR $B.'name     = '.$K.left_quote.$G.$name.$K.right_quote.$X.NL);
+        #prints(STDERR $B.'args_out = '.$K.left_quote.$G.$args_out.$K.right_quote.$X.NL);
+        #prints(STDERR $B.'def      = '.$K.left_quote.$G.$def.$K.right_quote.$X.NL);
+        #prints(STDERR $B.'def_out  = '.$K.left_quote.$G.$def_out.$K.right_quote.$X.NL);
         #}
       } else {
-        print(STDOUT ($placeholders_for_excluded_defines =~ s/%/$name/roamsxg));
+        printfd(STDOUT, ($placeholders_for_excluded_defines =~ s/%/$name/roamsxg));
       }
     }
   }

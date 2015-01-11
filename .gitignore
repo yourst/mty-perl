@@ -48,9 +48,10 @@ ncscope.*
 # Directories
 build/*.log
 build/perl-config.mk
+build/extdeps.mk
 internal
 private
 .internal
 .private
-
-
+MTY-staging
+scripts-staging

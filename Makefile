@@ -7,7 +7,7 @@
 
 default: all
 
-.PHONY: default sync-modules install-modules sync-scripts install-scripts sync install-without-sync install info clean all
+.PHONY: default sync-modules install-modules sync-scripts install-scripts sync install-without-sync install info clean commit push all
 
 GENERATED_MAKE_INCLUDES := build/perl-config.mk build/modules.mk build/perl-scripts.mk build/deps.mk build/extdeps.mk
 
@@ -32,7 +32,7 @@ ifndef SKIP_MAKE_INCLUDES
 # Determine the current Perl version and its standard library directories:   +
 #----------------------------------------------------------------------------+
 
-$(call include_if_exists,build/perl-config.mk)
+-include build/perl-config.mk
 
 PERL_CONFIG_VARS := VERSION ARCHNAME PERLPATH SITELIB SITEARCH 
 
@@ -44,13 +44,14 @@ endef # get_perl_config_script
 
 ifeq (,${PERL_VERSION})
 # Build perl-config.mk for the first time:
-$(info Querying and caching current Perl configuration details...)
+$(call print_build,config,Querying and caching current Perl configuration details...)
 $(shell mkdir -p build && perl -e '${get_perl_config_script}' > build/perl-config.mk)
 $(call include,build/perl-config.mk)
 ifeq (,${PERL_VERSION})
 $(error Cannot query Perl configuration - is Perl installed?)
 endif # (missing PERL_* definitions)
-$(foreach var,$(addprefix PERL_,${PERL_CONFIG_VARS}),$(info - ${var}${TAB}= ${${var}}))
+$(foreach var,$(addprefix PERL_,${PERL_CONFIG_VARS}),$(info ${TAB}${TAB} - ${var}${TAB}= ${${var}}))
+$(info )
 else # PERL_VERSION is set
 # Declare a rule to ensure perl-config.mk is rebuilt 
 # if the perl version and/or paths have changed:
@@ -59,34 +60,30 @@ build/perl-config.mk: ${perl_perlpath} Makefile | build
 	perl build/get-perl-config.pl > $@
 endif # PERL_VERSION
 
-ifdef DISABLED
+-include build/extdeps.mk
 
-$(call include_if_exists,build/extdeps.mk)
-
-define check_ext_dep
-$(if $(findstring OK: ${1},$(shell perl -e 'use ${1}; my @syms = keys %{${1}::}; if (scalar @syms) { print("OK: ${1}\n"); };' 2>/dev/null)),\
-$(info ${TAB}${TAB} - ${1} (found)),$(info ${TAB}${TAB} ! ${1} (MISSING))${1})
-endef # check_ext_dep
-
-ifeq (,${extdeps[ALL]})
-$(call print_build,config,Checking for dependencies on external Perl modules...)
-$(shell scripts/perl-mod-deps-standalone -ax MTY/**/*.pm scripts/* > build/extdeps.mk)
-$(call include,build/extdeps.mk)
-ifeq (,${extdeps[ALL]})
-$(error Cannot determine external Perl modules this project depends on)
-endif # ! extdeps[ALL]
-MISSING_DEPS := $(sort $(foreach dep,$(filter-out MTY::%,${extdeps[ALL]}),$(call check_ext_dep,${dep})))
-$(if ${MISSING_DEPS},$(error Could not find and/or successfully load $(words ${MISSING_DEPS}) required external packages. Install these packages first, then try running make again.))
-else # extdeps[ALL] is defined
-#build/extdeps.mk: 
-endif # extdeps[ALL]
-
-endif # DISABLED
+ifneq (1,$(ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED))
+$(call print_build,config,Checking availability and versions of required external Perl modules...)
+REQUIRED_EXT_PERL_PACKAGES_AND_VERSIONS := Exporter::Lite POSIX::2008=0.03 Linux::UserXAttr=0.02 PPI=1.2 Regexp::Optimizer=0.2 Unicode::String=2.08.52
+REQUIRED_EXT_PERL_PACKAGES := $(foreach pv,${REQUIRED_EXT_PERL_PACKAGES_AND_VERSIONS},$(firstword $(subst =, ,${pv})))
+$(shell scripts/check-ext-deps ${REQUIRED_EXT_PERL_PACKAGES_AND_VERSIONS} >& build/extdeps.mk)
+include build/extdeps.mk
+$(info )
+ifneq (1,$(ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED))
+$(info ${missing_or_outdated_deps_warning})
+$(info Please install and/or upgrade the packages listed above, then re-run make.)
+$(info Perl packages may be installed using the 'cpan' command or the standard)
+$(info package installation tool for your Linux distribution (e.g. 'rpm', 'dpkg'),)
+$(info if your distribution provides the required Perl packages in that format).
+$(info )
+$(error Cannot proceed until the packages above are installed or upgraded.)
+endif # ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED != 1
+endif # ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED != 1
 
 #
 # PERL_MODULES / MTY/build/modules.mk (persistent cached make variable)
 #
-$(call include_if_exists,build/modules.mk)
+-include build/modules.mk
 ifeq (,${PERL_MODULES})
 GENERATE_MODULES_LIST := 1
 endif # ! PERL_MODULES
@@ -113,7 +110,7 @@ build/modules.list: ${PERL_MODULE_DIRS} build/perl-config.mk | build
 #
 # PERL_SCRIPTS / scripts/build/perl-scripts.mk (persistent cached make variable)
 #
-$(call include_if_exists,build/perl-scripts.mk)
+-include build/perl-scripts.mk
 ifeq (,${PERL_SCRIPTS})
 PERL_SCRIPTS := $(call find_scripts_handled_by_interpreter,perl,scripts/*)
 endif # ! PERL_SCRIPTS
@@ -150,7 +147,6 @@ find_direct_deps_of_pl_file = $(find_direct_deps_of_perl_file)
 find_direct_deps_of_perl_file = $(addsuffix .pm,$(subst ::,/,$(subst ${NL}, ,$(sort $(shell grep -P -o '\buse\s*+\K[A-Z\_]\w*[\w\:]*' ${1})))))
 find_direct_deps_of_perl_files = $(subst ${SPACE},${NL},$(addprefix deps[,$(subst :,]+=,$(addsuffix .pm,$(subst ::,/,$(sort $(shell grep -H -P -o '\buse\s*+\K[A-Z\_]\w*[\w\:]*' ${1})))))))
 
-#$(call include_if_exists,build/deps.mk)
 -include build/deps.mk
 
 ifeq (,${DEPS_AVAILABLE})
@@ -247,7 +243,11 @@ clean:
 	$(call print_build,CLEAN,Cleaning and removing all generated files)
 	@rm -r -f -v build/ $(addsuffix /All.pm,${PERL_MODULE_DIRS}) $(wildcard MTY/*/All.pm) $(wildcard MTY/All.pm)
 
+commit:
+	git add -v .
+	git commit
+
 push:
-	@git push origin master
+	git push origin master
 
 all: $(addsuffix /All.pm,${PERL_MODULE_DIRS}) build/modules.list build/perl-scripts.list 

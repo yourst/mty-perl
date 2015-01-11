@@ -42,19 +42,6 @@ use MTY::Display::TextInABox;
 use MTY::Display::Tree;
 use re qw(regexp_pattern is_regexp regmust regname regnames regnames_count);
 
-use Text::Format;
-
-use Data::Dumper;
-
-use Data::Printer {
-  indent => 2,
-  hash_separator => '=>',
-  colored => 0,
-  index => 0,
-  multiline => 1,
-  print_escapes => 1,
-};
-
 binmode STDOUT, ':utf8';
 binmode STDERR, ':utf8';
 
@@ -143,7 +130,7 @@ sub beautify_regexp_token($$+;$$$$) {
   my ($token, $type, $subparts, $cap_group_index, $append_to_comment, $keep_orig_spacing, $hide_implied_backslashes) = @_;
 
 
-#  if ($type !~ /^\d+$/) { print(STDERR NL.NL."type = [$type]\n".NL.NL); die; }
+#  if ($type !~ /^\d+$/) { prints(STDERR NL.NL."type = [$type]\n".NL.NL); die; }
   $cap_group_index //= 0;
   $keep_orig_spacing //= 0;
   $hide_implied_backslashes //= (!$keep_orig_spacing);
@@ -165,7 +152,7 @@ sub beautify_regexp_token($$+;$$$$) {
     if ($hide_implied_backslashes) { $token =~ s/$any_escaped_symbol_re//oamsxg; }
   } elsif ($type == RE_TOKEN_LITERAL) {
     if ($hide_implied_backslashes) { $token =~ s/$any_escaped_symbol_re//oamsxg; }
-    $token = $K.left_quote.$G.$token.$K.right_quote;
+    $token = format_quoted(G.$token);
   } elsif ($type == RE_TOKEN_ESCAPED_CHAR_CLASS) {
     if ($token eq '\\s') {
       $token = ($use_enhanced_regexp_unicode_symbols) ? ($empty_square.' ') : ($Y.$U.' ');
@@ -302,7 +289,7 @@ my %token_type_to_token_symbol = (
   RE_TOKEN_LITERAL_STRING,              left_quote.right_quote,
   RE_TOKEN_LITERAL_NUMERIC,             left_quote.right_quote,
   RE_TOKEN_ANY_CHAR,                    star_with_6_points,
-  RE_TOKEN_ESCAPED_CHAR_CLASS,          copyright_symbol.copyright_symbol,
+  RE_TOKEN_ESCAPED_CHAR_CLASS,          copyright_symbol,
   RE_TOKEN_SPACE_CHAR_CLASS,            under_space,
   RE_TOKEN_BRACKETED_CHAR_SET,          small_upper_left_corner_bracket.small_lower_right_corner_bracket,
   RE_TOKEN_ANCHOR,                      anchor_symbol,
@@ -488,7 +475,7 @@ sub short_list_compiled_regexps(;+) {
 
   my @keylist = sort(keys %compiled_regexps);
   my $re_name_line_len = 2;
-  print(STDOUT "  ");
+  printfd(STDOUT, "  ");
 
   foreach my $regexpname (@keylist) {
     #if (defined(@{$regexp_names_to_print})) {
@@ -496,13 +483,13 @@ sub short_list_compiled_regexps(;+) {
     #}
 
     if (($re_name_line_len + (length($regexpname) + 2)) >= 78) {
-      print(STDOUT "\n  ");
+      printfd(STDOUT, "\n  ");
       $re_name_line_len = 2;
     }
-    print(STDOUT $G.$regexpname.$K.", ");
+    printfd(STDOUT, $G.$regexpname.$K.", ");
     $re_name_line_len += length($regexpname) + 2;
   }
-  print(STDOUT "${X}\n\n");
+  printfd(STDOUT, "${X}\n\n");
 }
 
 sub list_compiled_regexps() {
@@ -525,9 +512,9 @@ sub list_compiled_regexps() {
       my $n = length($regexpname) + 3;
       my $padcount = 40 - (($n <= 40) ? $n : 40);
       my $regexpname_padded = $Y.$regexpname.'_re'.$K.('.' x $padcount);
-      print(STDOUT '  '.$regexpname_padded.$description."\n");
+      printfd(STDOUT, '  '.$regexpname_padded.$description."\n");
     } else {
-      print(STDOUT '  '.$Y.$regexpname.'_re'.$X."\n");
+      printfd(STDOUT, '  '.$Y.$regexpname.'_re'.$X."\n");
     }
   }
 }
@@ -590,11 +577,8 @@ sub show_compiled_regexp($;$$$) {
   if (length($description) > 0) {
     my $description_color = '%{rgb=#d8d8d8}';
 
-    my $wrapped = Text::Format->new(columns => $box_width-4,
-                                    firstIndent => 0, 
-                                    bodyIndent => 0, 
-                                    justify => 1, 
-                                    tabstop => 1)->format($description);
+    my $wrapped = word_wrap_long_lines($description, $box_width-4);
+
     chomp $wrapped;
     $wrapped =~ s{\n\K}{$description_color}oamsxg;
     $boxed_text .= $description_color.$wrapped.NL;
@@ -622,16 +606,16 @@ sub show_compiled_regexp($;$$$) {
   my $modifier_separator = $B.dashed_vert_bar_3_dashes.$M;
   $boxed_text .= describe_regexp_metadata($metadata);
 
-  print(STDOUT text_in_a_box($boxed_text, ALIGN_LEFT, $B, 'rounded', 'dashed', undef, $box_width));
-  print(STDOUT NL);
+  printfd(STDOUT, text_in_a_box($boxed_text, ALIGN_LEFT, $B, 'rounded', 'dashed', undef, $box_width));
+  printfd(STDOUT, NL);
   
   if ($pretty_print) {
     print_tree($printable_tree, STDOUT);
   } else {
-    print(STDOUT $resrc.NL.NL);
+    printfd(STDOUT, $resrc.NL.NL);
   }
 
-  print(STDOUT NL);
+  printfd(STDOUT, NL);
 }
 
 sub show_compiled_regexps(;++$) {
@@ -642,9 +626,9 @@ sub show_compiled_regexps(;++$) {
   foreach my $regexp_name (@$regexp_name_list) {
     die if (!defined($regexp_name));
     if (!exists($regexp_hash_table->{$regexp_name})) {
-      print(STDERR NL.$Y.' '.warning_sign.' '.$Y.$U.'WARNING:'.$X.$R.
-            ' specified built-in regexp '.$K.left_quote.
-            $C.$re_name.$K.right_quote.$R.' does not exist'.$X.NL.NL);
+      printfd(STDERR, NL.$Y.' '.warning_sign.' '.$Y.$U.'WARNING:'.$X.$R.
+            ' specified built-in regexp '.format_quoted($C.$re_name).
+              $R.' does not exist'.$X.NL.NL);
       next;
     }
 
@@ -653,7 +637,7 @@ sub show_compiled_regexps(;++$) {
     show_compiled_regexp($regexp_name, $regexp_hash_table->{$regexp_name},
                          $description, $pretty_print);
   }
-  print(NL.$K.'Finished presenting '.$Y.scalar(@$regexp_name_list).$K.' regular expressions.'.$X.NL.NL);
+  prints(NL.$K.'Finished presenting '.$Y.scalar(@$regexp_name_list).$K.' regular expressions.'.$X.NL.NL);
 }
 
 sub show_raw_compiled_regexps(;++) {

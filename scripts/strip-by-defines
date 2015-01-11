@@ -29,7 +29,7 @@ while (<STDIN>) {
   }
 
   if ($outenable) {
-    print($line);
+    prints($line);
   }
 
   $outenable = $newoutenable;

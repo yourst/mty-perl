@@ -266,6 +266,14 @@ sub prep_to_format_table(+;++) {
   return \@lengths;
 }
 
+my @format_table_valid_options = 
+  qw(colseps row_prefix row_suffix align clip_to_length
+    lengths wrap_above_max_col_widths first_line_prefix
+    subsequent_line_prefix clip_above_percentile return_matrix
+    return_lines fd);
+
+my %format_table_valid_options = array_to_hash_keys(@format_table_valid_options);
+
 sub format_table(+;%) {
   my ($rows, %options) = @_;
 
@@ -274,14 +282,15 @@ sub format_table(+;%) {
       $first_line_prefix, $subsequent_line_prefix,
       $clip_above_percentile, $return_matrix, 
       $return_lines, $fd) =
-    @options{qw(colseps row_prefix row_suffix align clip_to_length
-    lengths wrap_above_max_col_widths first_line_prefix
-    subsequent_line_prefix clip_above_percentile return_matrix
-    return_lines fd)};
+    @options{@format_table_valid_options};
+
+  # foreach my $option (keys %options) 
+  #   { warn("format_table: ignoring invalid option '$option'") if (!exists $format_table_valid_options{$option}); }
 
   $colseps //= ($return_matrix ? '' : ' ');
   $row_prefix //= '';
   $row_suffix //= NL;
+
   my ($even_row_prefix, $odd_row_prefix) = 
     (is_array_ref($row_prefix) ? @$row_prefix : ($row_prefix, $row_prefix));
 
@@ -307,6 +316,7 @@ sub format_table(+;%) {
     }
 
     $lengths //= prep_to_format_table($rows, $wrap_above_max_col_widths, $clip_above_percentile);
+
     ($rows, $expanded_row_to_orig_row) = wrap_table_cells($rows, $wrap_above_max_col_widths, $lengths,
                                                         $first_line_prefix, $subsequent_line_prefix);
   }
@@ -436,7 +446,7 @@ sub test_format_table() {
   my $other_tables = [
     [
       [
-        ['first',        'premier',       '1st'],
+        [qw(first premier 1st)],
         ['second',       'sorry sekond',  '2nd'],
         ['third',        'trois place',   '3'],
         ['fourth',       'finale',        'four is more'],
@@ -454,7 +464,7 @@ sub test_format_table() {
     ],
   ];
 
-#  use DDP; print(STDERR p $tables_and_options);
+#  use DDP; prints(STDERR p $tables_and_options);
 #  return;
 
   foreach my $table_and_options (@$tables_and_options) {

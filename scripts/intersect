@@ -73,7 +73,7 @@ if ($quiet) {
   $show_counts = 0;
 }
 
-#print(STDERR "$mincount $maxcount $show_counts $show_fileids $show_filenames\n");
+#prints(STDERR "$mincount $maxcount $show_counts $show_fileids $show_filenames\n");
 
 my %foundin = ( );
 
@@ -88,10 +88,10 @@ for (my $i = 0; $i < $filecount; $i++) {
     $added{$k} = 1;
     if (!exists $foundin{$k}) {
       $foundin{$k} = [ $i ];
-      # print("foundin{$k} = $i\n");
+      # prints("foundin{$k} = $i\n");
     } else {
       push @{$foundin{$k}}, $i;
-      # print("foundin{$k} += ".join(' ', @{$foundin{$k}}).' too many') if (scalar(@{$foundin{$k}}) > $filecount);
+      # prints("foundin{$k} += ".join(' ', @{$foundin{$k}}).' too many') if (scalar(@{$foundin{$k}}) > $filecount);
     }
   }
 }
@@ -111,7 +111,7 @@ my $margin_width =
 
 $longest_line = min($longest_line, $w - $margin_width);
 my $margin_left = bg_color_rgb(40, 40, 40).' ';
-#print(join("\n", @unique_lines));
+#prints(join("\n", @unique_lines));
 my $darkK = fg_color_rgb(48, 104, 104);
 my $darkR = fg_color_rgb(140, 48, 64);
 
@@ -122,7 +122,7 @@ if (defined $only_in_fileid) {
     next if ($n != 1);
     my $fid = $fileids->[0];
     next if ($fid != $only_in_fileid);
-    print($k.NL);
+    prints($k.NL);
   }
   exit 0;
 }
@@ -130,9 +130,9 @@ if (defined $only_in_fileid) {
 foreach $k (@unique_lines) {
   my $fileids = $foundin{$k};
   my $n = scalar(@$fileids);
-  # print('k ['.$k.'] #'.$n.' = ['.join(' ', @$fileids).']'.NL);
+  # prints('k ['.$k.'] #'.$n.' = ['.join(' ', @$fileids).']'.NL);
   if (($n >= $mincount) && ($n <= $maxcount)) {
-    #print('['.$n.': '. join(' ', @$fileids).'] vs ['.$mincount.','.$maxcount.'] '.$k);
+    #prints('['.$n.': '. join(' ', @$fileids).'] vs [qw(.$mincount. .$maxcount.)] '.$k);
     if ($show_margin) {
       my $s = (($n == $filecount) ? bg_color_rgb(16, 40, 16) : bg_color_rgb(48, 12, 12)).' ';
       my $c = ($n == 1) ? (($filecount <= 2) ? $Y : $R) : ($n == $filecount) ? $G : $Y;
@@ -174,10 +174,10 @@ foreach $k (@unique_lines) {
       }
       $c = ($n == 1) ? (($filecount <= 2) ? $darkK : $darkR) : ($n == $filecount) ? (($filecount <= 2) ? $C : $G) : $Y;
       $s .= ' '.$X.$K.(($n == $filecount) ? $G.chr(0x2503) : fg_color_rgb(96, 96, 96).long_narrow_double_vert_bars).$X.' '.$c;
-      print($s);
+      prints($s);
     }
-    #if ($show_filenames) { print($K.'[ '.$Y.join(' ', @$fileids).$K.' ] '.$X); }
-    print($k.NL);
+    #if ($show_filenames) { prints($K.'[ '.$Y.join(' ', @$fileids).$K.' ] '.$X); }
+    prints($k.NL);
   }
 }
 

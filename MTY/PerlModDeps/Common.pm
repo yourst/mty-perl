@@ -51,8 +51,6 @@ use MTY::RegExp::Strings;
 use MTY::RegExp::Numeric;
 use MTY::System::POSIX;
 
-use Data::Dumper;
-use Data::Printer;
 
 use PPI;
 use PPI::Document;
@@ -62,7 +60,6 @@ use PPI::Structure;
 use PPI::Cache;
 use PPI::Dumper;
 
-use DateTime;
 
 #
 # Command line options
@@ -236,7 +233,7 @@ sub write_updated_file($) {
 
   if ($changed_anything) {
     if ($is_stdio) {
-      print(STDOUT $m->{code});
+      printfd(STDOUT, $m->{code});
     } elsif (!$dryrun) {
       write_file($m->{filename}, $m->{code});
     }

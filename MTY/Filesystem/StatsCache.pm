@@ -166,13 +166,13 @@ sub dump_file_stats_cache() {
   my @abs_path_list = sort keys %$h;
   my $longest_abs_path = maxlength(@abs_path_list);
 
-  print(STDERR 'Stats Cache ('.(scalar @abs_path_list).' unique filesystem objects cached):'.NL);
-  print(STDERR "  Performance: $hits hits, $misses misses, $flushes flushes (".
+  printfd(STDERR, 'Stats Cache ('.(scalar @abs_path_list).' unique filesystem objects cached):'.NL);
+  printfd(STDERR, "  Performance: $hits hits, $misses misses, $flushes flushes (".
           ratio_to_percent($hits, $hits+$misses).'% hit rate)'.NL);
 
   foreach my $abs (@abs_path_list) {
     my $stats = $h->{$abs};
-    print(STDERR '  '.padstring($abs, $longest_abs_path).' => {'.
+    printfd(STDERR, '  '.padstring($abs, $longest_abs_path).' => {'.
             ((defined $stats) ? join(', ', @$stats) : '<undef>').'}'.NL);
   }
 

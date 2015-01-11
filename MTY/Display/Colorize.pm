@@ -474,6 +474,7 @@ my @color_style_code_markup_to_code_map = (
   'U' => U, 'N' => BLINK, 'V' => V, 
   '!U' => UX, '!N' => BLINKX, '!V' => VX,
   'X' => X, '!X' => X,
+  '%' => '%',
 );
 
 our %basic_color_markup_to_code_map = (
@@ -577,21 +578,19 @@ sub replace_color_code($) {
 }
 
 sub colorize($) {
-  my $s = $_[0];
-  $s =~ s/$color_markup_re/replace_color_code($1)/oamsxge;
+  return $_[0] =~ s/$color_markup_re/replace_color_code($1)/roamsxge;
   # If color is disabled, just strip out the color markups:
-  # $s =~ s/$color_markup_re//oamsxg;
-  return qq/$s/;
+  # return $_[0] =~ s/$color_markup_re//roamsxg;
 }
 
 sub clear_screen {
   return if (!is_stderr_color_capable());
-  print(STDERR $CLEAR_SCREEN);
+  printfd(STDERR, $CLEAR_SCREEN);
 }
 
 sub clear_tab_stops {
   return if (!is_stderr_color_capable());
-  print(STDERR $CLEAR_TAB_STOPS);
+  printfd(STDERR, $CLEAR_TAB_STOPS);
 }
 
 my $cached_terminal_rows = undef;
@@ -662,7 +661,7 @@ sub get_tab_stop_codes(@) {
 
 sub set_tab_stops {
   return if (!is_stderr_color_capable());
-  print(STDOUT get_tab_stop_codes(@_));
+  printfd(STDOUT, get_tab_stop_codes(@_));
 }
 
 sub color_sample_text(;$$$) {

@@ -110,7 +110,7 @@ foreach (@man_page_lines) {
 
   if (/^ \s* $/oax) {
     $accum_blank_lines++;
-    if ($accum_blank_lines < 2) { print($lessfd NL); }
+    if ($accum_blank_lines < 2) { printfd($lessfd, NL); }
     next;
   } else {
     $accum_blank_lines = 0;
@@ -118,7 +118,7 @@ foreach (@man_page_lines) {
 
   if (!$seen_top && ($without_colors =~ /$man_top_subject_and_section_re/oax)) {
     ($subject, $section) = (lc($1), $2);
-    print($lessfd text_in_a_box($G.$subject.format_man_section($section),
+    printfd($lessfd, text_in_a_box($G.$subject.format_man_section($section),
                                   ALIGN_CENTER, $B, 'heavy', undef, 1, $cols-6));
     $seen_top = 1;
   } elsif (/$man_heading_re/oax) {
@@ -126,7 +126,7 @@ foreach (@man_page_lines) {
     my $tab_text_color = $man_heading_to_text_color{$heading} // $C;
     my $tab_outline_color = $man_heading_to_text_color{$heading} // $C;
     $heading = ucfirst(lc($heading));
-    print($lessfd print_folder_tab($tab_text_color.$heading.X, $tab_outline_color, ALIGN_LEFT));
+    printfd($lessfd, print_folder_tab($tab_text_color.$heading.X, $tab_outline_color, ALIGN_LEFT));
   } else {
     my $out = $_ 
       =~ s{' ($inside_single_quoted_string_nocap_re) '}{${left_single_quote}${1}${right_single_quote}}roaxg
@@ -137,7 +137,7 @@ foreach (@man_page_lines) {
       =~ s{(\s*) $ansi_clear_color_codes_re}{$X$1}roaxg
       =~ s{$ansi_fg_color_codes_re (?= --?\S+)}{$M}roaxg
       =~ s{$ansi_fg_color_codes_re}{($ansi_color_index_to_replacement{$1} // '')}roaxge;
-    print($lessfd $out.NL);
+    printfd($lessfd, $out.NL);
   }
 }
 

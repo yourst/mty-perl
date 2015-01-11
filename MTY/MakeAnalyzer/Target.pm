@@ -83,8 +83,8 @@ sub add_implicit_targets_to_target_list(+) {
 
   my @implicit_targets = ( );
 
-  print(STDERR print_folder_tab($M.'Adding Missing Implicit Targets...'));
-  print(STDERR $C.$U.'Adding missing implicit pseudo-targets (i.e. source files) not declared in makefiles...'.$X.NL);
+  printfd(STDERR, print_folder_tab($M.'Adding Missing Implicit Targets...'));
+  printfd(STDERR, $C.$U.'Adding missing implicit pseudo-targets (i.e. source files) not declared in makefiles...'.$X.NL);
 
   foreach $t (values %$targets) {
     my $name = $t->{name};
@@ -100,11 +100,11 @@ sub add_implicit_targets_to_target_list(+) {
     }
   }
 
-  print(STDERR $G.' '.checkmark.' done: found and added '.$Y.scalar(@implicit_targets).' implicit pseudo-targets:'.NL.NL);
+  printfd(STDERR, $G.' '.checkmark.' done: found and added '.$Y.scalar(@implicit_targets).' implicit pseudo-targets:'.NL.NL);
   foreach my $it (sort @implicit_targets) { 
-    print(STDERR $K.' '.dot_small.' '.$Y.format_file_path($it).$X.NL); 
+    printfd(STDERR, $K.' '.dot_small.' '.$Y.format_file_path($it).$X.NL); 
   }
-  print(STDERR NL);
+  printfd(STDERR, NL);
 }
 
 sub format_target(+) {
@@ -196,7 +196,7 @@ sub print_targets_in_category(+$;$) {
 
   $fd //= STDOUT;
 
-  print($fd NL.text_in_a_box($M.$category.$C.' Targets '.$B.
+  printfd($fd, NL.text_in_a_box($M.$category.$C.' Targets '.$B.
     ' ('.scalar(@$tgtlist).')'.$X, 0, $B, 'single', undef, 20, 40).NL);
   
   foreach my $t (@$tgtlist) {
@@ -236,8 +236,6 @@ sub print_summary_of_target(+;$) {
   $fd //= STDOUT;
 
   die if (!defined $t);
-  #use Data::Printer;
-  #print(STDERR '$t = '.p($t));
 
   my $name = $t->{name};
   my $type = $t->{type};
@@ -339,7 +337,7 @@ sub targets_to_dep_lists(+;$$) {
     my $name = $t->{name};
     my $deps = $t->{deps};
     my $oodeps = $t->{order_only_deps};
-    #print( "targets_to_dep_lists: target name [$name] @ ".$t." => deps ".($t->{deps}//'undef').', oodeps '.($t->{oodeps}//'undef').NL);
+    #prints( "targets_to_dep_lists: target name [$name] @ ".$t." => deps ".($t->{deps}//'undef').', oodeps '.($t->{oodeps}//'undef').NL);
     my @deplist = ( );
     push @deplist, @{$t->{deps}} if ($include_normal_deps);
     push @deplist, @{$t->{order_only_deps}} if ($include_order_only_deps);
@@ -436,10 +434,10 @@ sub print_dependency_tree_from_target_deps_and_labels(+$++;$+) {
 
   if (!defined $visited) { $visited = { }; }
 
-  print($outfd print_folder_tab($label));
+  printfd($outfd, print_folder_tab($label));
   my $tree = dependency_graph_to_tree($target_name, $target_names_to_deps, $target_names_to_labels, $options, $visited);
   print_tree($tree, $outfd);
-  print($outfd NL);
+  printfd($outfd, NL);
 }
 
 sub print_dependency_trees_for_all_targets(+;$$$$) {
@@ -455,7 +453,7 @@ sub print_dependency_trees_for_all_targets(+;$$$$) {
 
   my %visited = ( );
 
-  print(STDERR print_folder_tab($R.'Implicit Targets (source files, Makefiles, etc)'));
+  printfd(STDERR, print_folder_tab($R.'Implicit Targets (source files, Makefiles, etc)'));
 
   my $implicit_targets_pseudo_root_node = [ $R.'Implicit Targets' ];
 

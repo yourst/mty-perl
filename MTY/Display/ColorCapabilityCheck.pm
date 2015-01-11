@@ -106,7 +106,7 @@ sub colorize_debug_log($) {
   my ($message) = $_[0];
   chomp $message;
   $message =~ s{^}{[colorize debug] }oamsxg;
-  print(STDERR $message.NL);
+  printfd(STDERR, $message.NL);
 }
 
 sub is_filehandle_color_capable($) {
@@ -196,7 +196,7 @@ sub is_filehandle_color_capable($) {
       my $v = $terminal_name_to_color_capabilities{$k};
       if (contains($terminal, $k)) { $terminal_color_capabilities = $v; last; }
     }
-    # if (!defined($terminal_color_capabilities)) { print(STDERR '[colorize debug] not def for fd'.NL); }
+    # if (!defined($terminal_color_capabilities)) { prints(STDERR '[colorize debug] not def for fd'.NL); }
     $terminal_color_capabilities //= 0;
   }
 

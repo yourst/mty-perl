@@ -275,7 +275,8 @@ sub die_and_print($$;$) {
 }
 
 INIT {
-  my $env_var_name = __PACKAGE__ =~ s/::/_/roaxg;
+  my $this_package = __PACKAGE__;
+  my $env_var_name = $this_package =~ s/::/_/roaxg;
   my $config = $ENV{$env_var_name};
   my $disabled = 0;
 
@@ -287,7 +288,7 @@ INIT {
     if (defined $aow) { $abort_on_warnings = $aow; }
   }
   
-  $skip_packages_and_functions_in_stack_backtrace{__PACKAGE__} = 1;
+  $skip_packages_and_functions_in_stack_backtrace{$this_package} = 1;
 
   if (!$disabled) {
     $SIG{__DIE__} = \&die_in_color;

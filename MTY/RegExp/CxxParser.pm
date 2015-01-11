@@ -176,7 +176,7 @@ sub replace_tokens_with_macro_defs_callback($$$$$$;$+) {
     my $replacement = $defs->{$token};
     if (defined $replacement) {
       if ($DEBUG) {
-        print(STDERR 'Replaced token '.format_chunk($token).' with '.
+        printfd(STDERR, 'Replaced token '.format_chunk($token).' with '.
                 format_chunk($replacement).' at offset '.$startpos.NL);
       }
       $token = $replacement;
@@ -194,12 +194,12 @@ sub tokenize_cxx ($&;@) {
   # remaining args are forwarded to each invocation of callback
 
   my ($leading_whitespace) = ($original =~ /$leading_whitespace_re/oamsxgc);
-  my $line = 1 + length($leading_whitespace =~ s/[^\n]//roamsxg);
+  my $line = 1 + length($leading_whitespace =~ s/\N//roamsxg);
   
   if ($DEBUG) { 
-    print(STDERR $B.'Leading whitespace had '.length($leading_whitespace).
+    printfd(STDERR, $B.'Leading whitespace had '.length($leading_whitespace).
           ' characters with '.($line-1).' newlines'.$X.NL);
-    print(STDERR $B.'pos(original) = '.pos($original).$X.NL);
+    printfd(STDERR, $B.'pos(original) = '.pos($original).$X.NL);
   }
 
   local $REGMARK = undef;
@@ -310,14 +310,14 @@ sub tokenize_cxx ($&;@) {
 
       my $tokendump_length = printed_length($tokendump);
       if (($chars_on_this_line + $tokendump_length) >= $max_chars_per_line) {
-        print(STDERR NL.$tokendump);
+        printfd(STDERR, NL.$tokendump);
         $chars_on_this_line = $tokendump_length;
       } else {
-        print(STDERR $tokendump);
+        printfd(STDERR, $tokendump);
         $chars_on_this_line += $tokendump_length; 
       }
       if ($newline) {
-        print(STDERR $tokendump.NL);
+        printfd(STDERR, $tokendump.NL);
         $chars_on_this_line = 0;
       }
     }
@@ -326,7 +326,7 @@ sub tokenize_cxx ($&;@) {
   }
 
   if ($DEBUG) {
-    print(STDERR NL);
+    printfd(STDERR, NL);
   }
 
   my $p = pos($original) // 0;
@@ -353,13 +353,13 @@ sub cxx_tokenize_and_extract_strings($;+$) {
 
 
   my ($leading_whitespace) = ($original =~ /$leading_whitespace_re/oamsxgc);
-  my $line = 1 + length($leading_whitespace =~ s/[^\n]//roamsxg);
+  my $line = 1 + length($leading_whitespace =~ s/\N//roamsxg);
   my $text = '';
   
   if ($DEBUG) { 
-    print(STDERR $B.'Leading whitespace had '.length($leading_whitespace).
+    printfd(STDERR, $B.'Leading whitespace had '.length($leading_whitespace).
           ' characters with '.($line-1).' newlines'.$X.NL);
-    print(STDERR $B.'pos(original) = '.pos($original).$X.NL);
+    printfd(STDERR, $B.'pos(original) = '.pos($original).$X.NL);
   }
 
   local $REGMARK = undef;
@@ -475,7 +475,7 @@ sub cxx_tokenize_and_extract_strings($;+$) {
     my $newline = ($whitespace =~ /$nl_cr_ff_not_bs_nl_re/oamsx) ? 1 : 0;
     $text .= ($newline) ? NL : ' ';
     $line += $newline;
-    #print(STDERR NL.$R.'Text so far after adding '.format_chunk($token).' with whitespace ('.length($whitespace).' chrs -> ord '.ord($whitespace).' = '.format_chunk($whitespace).$R.' (NL? '.$newline.'): '.$X.format_chunk($text).$X.NL);
+    #prints(STDERR NL.$R.'Text so far after adding '.format_chunk($token).' with whitespace ('.length($whitespace).' chrs -> ord '.ord($whitespace).' = '.format_chunk($whitespace).$R.' (NL? '.$newline.'): '.$X.format_chunk($text).$X.NL);
 
     if ($DEBUG) {
       if ($newline) { 
@@ -486,21 +486,21 @@ sub cxx_tokenize_and_extract_strings($;+$) {
 
       my $tokendump_length = printed_length($tokendump);
       if (($chars_on_this_line + $tokendump_length) >= $max_chars_per_line) {
-        print(STDERR NL.$tokendump);
+        printfd(STDERR, NL.$tokendump);
         $chars_on_this_line = $tokendump_length;
       } else {
-        print(STDERR $tokendump);
+        printfd(STDERR, $tokendump);
         $chars_on_this_line += $tokendump_length; 
       }
       if ($newline) {
-        print(STDERR $tokendump.NL);
+        printfd(STDERR, $tokendump.NL);
         $chars_on_this_line = 0;
       }
     }
   }
 
   if ($DEBUG) {
-    print(STDERR NL);
+    printfd(STDERR, NL);
   }
 
   my $p = pos($original) // 0;
@@ -547,7 +547,7 @@ sub reinsert_extracted_strings($+) {
   }
 
   if ($extracted_string_count != $reinserted_string_count) {
-    print(STDERR $R.'extracted_string_count = '.$extracted_string_count.
+    printfd(STDERR, $R.'extracted_string_count = '.$extracted_string_count.
           ' but reinserted_string_count = '.$reinserted_string_count.
           ' (delta of '.($reinserted_string_count-$extracted_string_count).
           ' may be harmless if code restructuring or auto-generation passes'.
@@ -571,10 +571,10 @@ sub parse_struct_def {
   my $blocklen = length($block);
 
   if ($DEBUG) {
-    print(STDERR $Y.$U.'process_struct_def:'.$X.' '.$struct_class_union.' '.
+    printfd(STDERR, $Y.$U.'process_struct_def:'.$X.' '.$struct_class_union.' '.
           $G.$structname.$X.' (inherits from'.$M.' '.$inheritance.' '.$X.'): '.
           'block ('.$blocklen.' chars'.') = '.NL);
-    print(STDERR format_chunk($block, 120) . NL);
+    printfd(STDERR, format_chunk($block, 120) . NL);
   }
 
   my $word_index = 0;
@@ -584,8 +584,8 @@ sub parse_struct_def {
   my $startpos = pos($block);
 
   if ($DEBUG) {
-    print(STDERR NL.$C.$U.'Parsing struct '.$Y.$structname.':'.$X.NL.NL);
-    print(STDERR $B.'startpos = '.$startpos.$X.NL);
+    printfd(STDERR, NL.$C.$U.'Parsing struct '.$Y.$structname.':'.$X.NL.NL);
+    printfd(STDERR, $B.'startpos = '.$startpos.$X.NL);
   }
 
   my $current_access_spec = (($struct_class_union eq 'class') ? 'private' : 'public');
@@ -601,12 +601,12 @@ sub parse_struct_def {
     my $matchlen = $endpos - $startpos;
 
     if ($DEBUG && 0) {
-      print(STDERR '  '.$B.$U.'[@ pos '.$startpos.':'.($endpos-1).' ('.$matchlen.' chars)]: '.
+      printfd(STDERR, '  '.$B.$U.'[@ pos '.$startpos.':'.($endpos-1).' ('.$matchlen.' chars)]: '.
             $R.'chunk: '.format_chunk(substr($block, $startpos, $matchlen), 120).':'.$X.NL);
       foreach my $k (keys %+) {
         my $v = $+{$k};
         next if (is_empty($v));
-        print(STDERR '  '.$K.'| '.$Y.$k.$K.' ('.length($v),' chars) = '.format_chunk($v, 120).$K.$X.NL);
+        printfd(STDERR, '  '.$K.'| '.$Y.$k.$K.' ('.length($v),' chars) = '.format_chunk($v, 120).$K.$X.NL);
       }
     }
 
@@ -638,7 +638,7 @@ sub parse_struct_def {
 
     if (defined($field_decl_list)) {
       if ($DEBUG) {
-        print(STDERR $U.$C.'Field: '.
+        printfd(STDERR, $U.$C.'Field: '.
               $Y.'type.attrs'.$K.'='.$G.format_quoted($common_info{type_attributes}).$K.', '.
               $Y.'type.spec'.$K.'='.$G.format_quoted($common_info{type_specifier}).$K.', '.
               $Y.'type.ptr_or_ref'.$K.'='.$G.format_quoted($common_info{type_ptr_or_ref}).$K.', '.
@@ -692,13 +692,13 @@ sub parse_struct_def {
         push @fields, { %field_info };
 
         if ($DEBUG) {
-          print(STDERR '     '.$B.'[@ pos '.$field_decl_list_pos.' in field_decl_list]: '.
+          printfd(STDERR, '     '.$B.'[@ pos '.$field_decl_list_pos.' in field_decl_list]: '.
               format_chunk(substr($field_decl_list, $field_decl_list_pos, (pos($field_decl_list) - $field_decl_list_pos)), 120).$K.NL);
 
           foreach my $k (keys %field_info) {
             my $v = $field_info{$k};
             if (!defined($v)) { $v = '<undef>'; }
-            print(STDERR '     '.$K.'- '.$Y.$K.'- '.$Y.$k.$K.' = '.format_chunk($v, 120).$K.NL);
+            printfd(STDERR, '     '.$K.'- '.$Y.$K.'- '.$Y.$k.$K.' = '.format_chunk($v, 120).$K.NL);
           }
         }
 
@@ -715,26 +715,26 @@ sub parse_struct_def {
         $prev_was_bitfield = $is_bitfield;
 
         #if ($field_name eq 'c') {
-        #print(STDERR $C.'REMAINDER'.$K.' = '.format_chunk(substr($block, pos($block)), 120).$X.NL);
+        #prints(STDERR $C.'REMAINDER'.$K.' = '.format_chunk(substr($block, pos($block)), 120).$X.NL);
         #}
       }
       if ($prev_was_bitfield) { $word_index++; }
     } elsif (defined($function_chunk)) {
       if ($DEBUG) {
-        print(STDERR '  '.$U.$B.'@ pos '.$startpos.': '.$C.'parsing function '.
+        printfd(STDERR, '  '.$U.$B.'@ pos '.$startpos.': '.$C.'parsing function '.
               format_chunk($function_chunk, 120).':'.$X.NL);
 
         foreach my $k (keys %common_info) {
           my $v = $common_info{$k};
           if (!defined($v)) { $v = '<undef>'; }
-          print(STDERR '     '.$K.'- '.$Y.$k.$K.' = '.format_chunk($v, 120).$X.NL);
+          printfd(STDERR, '     '.$K.'- '.$Y.$k.$K.' = '.format_chunk($v, 120).$X.NL);
         }
       }
 
       my @arg_list = ();
       if (defined($argument_list)) {
         if ($DEBUG) {
-          print(STDERR '     '.$Y.'argument_list'.$K.' = '.format_chunk($argument_list).$X.NL);
+          printfd(STDERR, '     '.$Y.'argument_list'.$K.' = '.format_chunk($argument_list).$X.NL);
         }
 
         while ($argument_list =~ /$function_decl_argument_list_item_re/oamsgcx) {
@@ -751,7 +751,7 @@ sub parse_struct_def {
       }
 
       if ($DEBUG) {
-        print(STDERR '     '.$Y.'argument_list for '.$common_info{function_name}.' has '.(scalar(@arg_list) // 'undef').' function arguments'.NL);
+        printfd(STDERR, '     '.$Y.'argument_list for '.$common_info{function_name}.' has '.(scalar(@arg_list) // 'undef').' function arguments'.NL);
       }
 
       $common_info{argument_count} = scalar(@arg_list);
@@ -760,12 +760,12 @@ sub parse_struct_def {
       push @functions, { %common_info };
     } elsif (defined($access_spec)) {
       $current_access_spec = $access_spec;
-      if ($DEBUG) { print(STDERR $C.'access_spec_chunk:'.$B.' access specifier changed to '.$G.$current_access_spec.$X.NL); }
+      if ($DEBUG) { printfd(STDERR, $C.'access_spec_chunk:'.$B.' access specifier changed to '.$G.$current_access_spec.$X.NL); }
     } elsif (defined($enum_list)) {
-      if ($DEBUG) { print(STDERR '  '.$U.$C.'enum_list:'.$UX.' '.format_chunk($enum_list, 120).$X.NL); }
+      if ($DEBUG) { printfd(STDERR, '  '.$U.$C.'enum_list:'.$UX.' '.format_chunk($enum_list, 120).$X.NL); }
       push @enums, { %common_info };
     } elsif (defined($typedef_decl_list)) {
-      if ($DEBUG) { print(STDERR '  '.$U.$C.'typedef_decl_list:'.$UX.' '.format_chunk($typedef_decl_list, 120).$X.NL); }
+      if ($DEBUG) { printfd(STDERR, '  '.$U.$C.'typedef_decl_list:'.$UX.' '.format_chunk($typedef_decl_list, 120).$X.NL); }
 
       while ($typedef_decl_list =~ /$typedef_decl_re/oamsgcx) {
         my %typedef_info = ();
@@ -781,11 +781,11 @@ sub parse_struct_def {
         push @typedefs, { %typedef_info };
       }
     } else {
-      print(STDERR "Unknown chunk type within struct $structname @ pos $startpos: ".format_chunk($block, 120));
+      printfd(STDERR, "Unknown chunk type within struct $structname @ pos $startpos: ".format_chunk($block, 120));
       foreach my $k (keys %common_info) {
         my $v = $common_info{$k};
         if (!defined($v)) { $v = '<undef>'; }
-        print(STDERR '     '.$K.dot_in_circle.' '.$Y.$k.$K.' = '.format_chunk($v, 120).$X.NL);
+        printfd(STDERR, '     '.$K.dot_in_circle.' '.$Y.$k.$K.' = '.format_chunk($v, 120).$X.NL);
       }
       die();
     }
@@ -795,15 +795,15 @@ sub parse_struct_def {
   }
 
   $ending_pos_in_block = pos($block);
-  if ($DEBUG) { print(STDERR '  '.$B.'ending_pos_in_block = '.$ending_pos_in_block.' vs block length '.$blocklen.$X.NL); }
+  if ($DEBUG) { printfd(STDERR, '  '.$B.'ending_pos_in_block = '.$ending_pos_in_block.' vs block length '.$blocklen.$X.NL); }
   
   if (!finished($block)) {
     warn_no_stack_trace('Unable to parse entire definition of '.$G.$struct_class_union.' '.$structname.$R.':');
-    print(STDERR $K.'Parsed '.$G.pos($block).$K.' out of '.$G.length($block).$K.' characters; accepted vs rejected parts:'.$X.NL.
+    printfd(STDERR, $K.'Parsed '.$G.pos($block).$K.' out of '.$G.length($block).$K.' characters; accepted vs rejected parts:'.$X.NL.
             $G.' '.checkmark.' '.$X.format_chunk($block, -120, 1, $G, $C).NL.
               $R.' '.x_symbol.' '.$X.format_chunk($block, -120, 1, $R, $M).NL);
     foreach $k (keys %+) {
-      print(STDERR '  key '.$k.' => value '.format_quoted($+{$k}).NL);
+      printfd(STDERR, '  key '.$k.' => value '.format_quoted($+{$k}).NL);
     }
     die('Failed to parse input source code');
   }
@@ -823,24 +823,24 @@ sub parse_struct_def {
   }
 
   if ($DEBUG && 0) {
-    print(STDERR $K.('-' x 120).$X.NL);
-    print(STDERR $Y.$U.'$struct_class_union $structname'.$UX.$K.':'.$X.NL.NL);
+    printfd(STDERR, $K.('-' x 120).$X.NL);
+    printfd(STDERR, $Y.$U.'$struct_class_union $structname'.$UX.$K.':'.$X.NL.NL);
 
-    print(STDERR $C.$U.'fields:'.$X.NL);
+    printfd(STDERR, $C.$U.'fields:'.$X.NL);
     print_recursively(0, [@fields]);
-    print(STDERR NL);
+    printfd(STDERR, NL);
 
-    print(STDERR $C.$U.'functions:'.$X.NL);
+    printfd(STDERR, $C.$U.'functions:'.$X.NL);
     print_recursively(0, [@functions]);
-    print(STDERR NL);
+    printfd(STDERR, NL);
 
-    print(STDERR $C.$U.'typedefs:'.$X.NL);
+    printfd(STDERR, $C.$U.'typedefs:'.$X.NL);
     print_recursively(0, [@typedefs]);
-    print(STDERR NL);
+    printfd(STDERR, NL);
 
-    print(STDERR $C.$U.'enums:'.$X.NL);
+    printfd(STDERR, $C.$U.'enums:'.$X.NL);
     print_recursively(0, [@enums]);
-    print(STDERR NL);
+    printfd(STDERR, NL);
   }
 
   return (\@fields, \@functions, \@typedefs, \@enums, \@nested_structs);
@@ -851,7 +851,7 @@ sub print_parsed_struct_fields($$+) {
 
   $raw_data_type_word_index = 0;
   $count = scalar(@{$fields});
-  print(STDERR $Y.'Fields in '.$U.$M.'$struct_union_class '.$C.$structname.': '.$B.'('.$count.' fields)'.$X.NL);
+  printfd(STDERR, $Y.'Fields in '.$U.$M.'$struct_union_class '.$C.$structname.': '.$B.'('.$count.' fields)'.$X.NL);
 
   printf(STDERR $B.$U.'fid  @   pos  #b  bN : b0  word  flags      ptrf  datatype                       name                    '.$X.NL);
 
@@ -869,7 +869,7 @@ sub print_parsed_struct_fields($$+) {
 
       if ($DEBUG && 0) {
         my $vstr = $v // $R."<undef>".$X."";
-        print(STDERR '     '.$K.'- '.$Y.$k.$K.' = '.format_chunk($vstr, 120, 1).$K.NL);
+        printfd(STDERR, '     '.$K.'- '.$Y.$k.$K.' = '.format_chunk($vstr, 120, 1).$K.NL);
       }
     }
 
@@ -894,21 +894,21 @@ sub print_parsed_struct_fields($$+) {
            $type_specifier, ($is_padding ? ($K.'<padding>'.$G) : $field_name));
   }
 
-  print(STDERR $Y.'Fields in '.$M.$struct_union_class.' '.$C.$structname.$X.' '.$K.'{'.$X.NL);
+  printfd(STDERR, $Y.'Fields in '.$M.$struct_union_class.' '.$C.$structname.$X.' '.$K.'{'.$X.NL);
   foreach my $f (@{$fields}) {
     foreach my $k (@all_capture_group_names) { $$k = ''; }
     $startbit = 0; $endbit = 0; $bitwidth = 0;
 
     foreach my $k (keys %{$f}) { $$k = $f->{$k}; }
 
-    print(STDERR '  '.$C.$field_name.$X.$K.' = {'.NL);
+    printfd(STDERR, '  '.$C.$field_name.$X.$K.' = {'.NL);
     foreach my $k (keys %{$f}) {
       my $v = $f->{$k};
-      print(STDERR '    '.$Y.$k.$K.' = '.format_chunk($v, 120, 1).$K.';'.$X.NL);
+      printfd(STDERR, '    '.$Y.$k.$K.' = '.format_chunk($v, 120, 1).$K.';'.$X.NL);
     }
-    print(STDERR '  '.$K.'};'.$X.NL.NL);
+    printfd(STDERR, '  '.$K.'};'.$X.NL.NL);
   }
-  print(STDERR $K.'};'.$X.NL);
+  printfd(STDERR, $K.'};'.$X.NL);
 }
 
 sub print_parsed_struct_function($$+) {
@@ -917,44 +917,44 @@ sub print_parsed_struct_function($$+) {
   foreach my $k (@all_capture_group_names) { $$k = ''; }
   foreach my $k (keys %{$funcinfo}) { my $v = $funcinfo->{$k}; $$k = $v; }
 
-  print(STDERR '  '.$C.$function_name.$X.$K.' = {'.NL);
+  printfd(STDERR, '  '.$C.$function_name.$X.$K.' = {'.NL);
   foreach my $k (sort keys %{$funcinfo}) {
     my $v = $funcinfo->{$k};
-    print(STDERR '    '.$Y.$k.$K.' = ');
+    printfd(STDERR, '    '.$Y.$k.$K.' = ');
 
     if ($k eq 'arguments') {
       my $count = scalar(@{$v});
-      print(STDERR $C.$count.' arguments'.$K.' = {'.$X.NL);
+      printfd(STDERR, $C.$count.' arguments'.$K.' = {'.$X.NL);
       for (my $i = 0; $i < $count; $i++) {
         my %arg = %{$v->[$i]};
-        print(STDERR '      '.$K.'['.$M.'arg #'.$i.$K.'] = '.$X.NL);
+        printfd(STDERR, '      '.$K.'['.$M.'arg #'.$i.$K.'] = '.$X.NL);
         foreach my $argk (keys %arg) {
           $argdata = $arg{$argk};
-          print(STDERR "        ".$K.$Y.$argk.$K.' = ['.$G.$argdata.$K.']'.$X.';'.NL);
+          printfd(STDERR, "        ".$K.$Y.$argk.$K.' = ['.$G.$argdata.$K.']'.$X.';'.NL);
         }
-        print(STDERR '      '.$K.'}'.$X.NL);
+        printfd(STDERR, '      '.$K.'}'.$X.NL);
       }
-      print(STDERR '    '.$K.'}'.$X.NL);
+      printfd(STDERR, '    '.$K.'}'.$X.NL);
     } else {
-      print(STDERR format_chunk($v, 120, 1).$K.';'.$X.NL);
+      printfd(STDERR, format_chunk($v, 120, 1).$K.';'.$X.NL);
     }
   }
 
-  print(STDERR '    '.$R.$U.'Reconstructed:'.$X.NL);
-  print(STDERR '    '.$G.reconstruct_member_function($struct_union_class, $structname, $funcinfo).$X.NL);
+  printfd(STDERR, '    '.$R.$U.'Reconstructed:'.$X.NL);
+  printfd(STDERR, '    '.$G.reconstruct_member_function($struct_union_class, $structname, $funcinfo).$X.NL);
 
-  print(STDERR "  ".$K."};".$X.NL.NL);
+  printfd(STDERR, "  ".$K."};".$X.NL.NL);
 }
 
 sub print_parsed_struct_functions($$+) {
   my ($struct_union_class, $structname, $functions) = @_;
 
 
-  print(STDERR $Y.'Functions in '.$M.$struct_union_class.' '.$C.$structname.$X.' '.$K.'{'.NL);
+  printfd(STDERR, $Y.'Functions in '.$M.$struct_union_class.' '.$C.$structname.$X.' '.$K.'{'.NL);
   foreach my $f (@{$functions}) {
     print_parsed_struct_function($struct_union_class, $structname, $f);
   }
-  print(STDERR $K."};".$X.NL);
+  printfd(STDERR, $K."};".$X.NL);
 }
 
 sub reconstruct_member_function($$+) {
@@ -1010,7 +1010,7 @@ sub print_parsed_struct_typedefs($$+) {
 
   $raw_data_type_word_index = 0;
 
-  print(STDERR $Y.'Typedefs in '.$M.'$struct_union_class '.$C.$structname.$X.' '.$K.'{'.NL);
+  printfd(STDERR, $Y.'Typedefs in '.$M.'$struct_union_class '.$C.$structname.$X.' '.$K.'{'.NL);
   foreach my $t (@{$typedefs}) {
     foreach my $k (@all_capture_group_names) { $$k = ''; }
     $startbit = 0; $endbit = 0; $bitwidth = 0;
@@ -1021,14 +1021,14 @@ sub print_parsed_struct_typedefs($$+) {
       $$k = $v;
     }
 
-    print(STDERR "  ".$C.$typedef_new_type_name.$K.' = {'.NL);
+    printfd(STDERR, "  ".$C.$typedef_new_type_name.$K.' = {'.NL);
     foreach my $k (sort keys %{$t}) {
       my $v = $t->{$k};
-      print(STDERR '    '.$Y.$k.$K.' = '.format_chunk($v, 120, 1).$K.";".$X.NL);
+      printfd(STDERR, '    '.$Y.$k.$K.' = '.format_chunk($v, 120, 1).$K.";".$X.NL);
     }
-    print(STDERR "  ".$K."};".$X.NL.NL);
+    printfd(STDERR, "  ".$K."};".$X.NL.NL);
   }
-  print(STDERR $K."};".$X.NL);
+  printfd(STDERR, $K."};".$X.NL);
 }
 
 sub print_parsed_struct_enums($$+) {
@@ -1036,7 +1036,7 @@ sub print_parsed_struct_enums($$+) {
 
   $raw_data_type_word_index = 0;
 
-  print(STDERR $Y.'Enums in '.$M.$struct_union_class.' '.$C.$structname.$X.' '.$K.'{'.NL);
+  printfd(STDERR, $Y.'Enums in '.$M.$struct_union_class.' '.$C.$structname.$X.' '.$K.'{'.NL);
   foreach my $e (@{$enums}) {
     foreach my $k (@all_capture_group_names) { $$k = ''; }
     $startbit = 0; $endbit = 0; $bitwidth = 0;
@@ -1047,14 +1047,14 @@ sub print_parsed_struct_enums($$+) {
     }
 
     if (!length($enum_name)) { $enum_name = $K.'<anonymous>'.$X; }
-    print(STDERR '  '.$C.$enum_name.$X.$K.' = {'.NL);
+    printfd(STDERR, '  '.$C.$enum_name.$X.$K.' = {'.NL);
     foreach my $k (sort keys %{$e}) {
       my $v = $e->{$k};
-      print(STDERR '    '.$Y.$k.$K.' = '.format_chunk($v, 120, 1).$K.";".$X.NL);
+      printfd(STDERR, '    '.$Y.$k.$K.' = '.format_chunk($v, 120, 1).$K.";".$X.NL);
     }
-    print(STDERR "  ".$K.'};'.$X.NL.NL);
+    printfd(STDERR, "  ".$K.'};'.$X.NL.NL);
   }
-  print(STDERR $K.'};'.$X.NL);
+  printfd(STDERR, $K.'};'.$X.NL);
 }
 
 1;

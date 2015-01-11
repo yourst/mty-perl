@@ -22,7 +22,7 @@ my %command_line_options = (
   'indents' => [ \$input_format, 0, [ 'i' ], 'indents' ],
   'paths' => [ \$input_format, 0, [ 'p' ], 'paths' ],
   'deps' => [ \$input_format, 0, [ 'd' ], 'dependencies' ],
-  'sep' => [ \$path_separator, OPTION_VALUE_REQUIRED, [ 's', 'ps', 'pathsep', 'path-sep' ] ],
+  'sep' => [ \$path_separator, OPTION_VALUE_REQUIRED, [qw(s ps pathsep path-sep)] ],
   'verbose' => [ \$verbose, 0, [ 'v' ] ],
 );
 
@@ -41,7 +41,7 @@ if ($input_format eq 'auto') {
   }
 
   if ($verbose) {
-    print(STDERR 'print-tree: Auto-detected '.$input_format.' input format'.NL);
+    printfd(STDERR, 'print-tree: Auto-detected '.$input_format.' input format'.NL);
   }
 }
 
@@ -68,8 +68,6 @@ if ($input_format eq 'indents') {
       push @{$deps{$target}}, @prereqs;
     }
   }
-
-  use DDP; p %deps;
 
   foreach $deplist (values %deps) 
     { remove_dups_in_place($deplist); }

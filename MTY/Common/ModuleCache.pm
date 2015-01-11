@@ -31,19 +31,18 @@ BEGIN {
   push @alternatives, $ENV{HOME}.'/.perlcache/'.$^V.'/' if (exists $ENV{HOME});
   push @alternatives, '/tmp/.perlcache/'.$^V.'/';
 
-  foreach my $dir (@alternatives) {
-    if (-x $dir) { $cache_dir = $dir; last; }
-  }
+  foreach my $dir (@alternatives) 
+    { if (-x $dir) { $cache_dir = $dir; last; } }
 
   if (!defined $cache_dir) {
     my @create_dirs = ($home_cache_dir, $tmp_cache_dir);
     foreach my $dir (@create_dirs) {
       my $parent_dir = ($dir =~ s{$strip_last_path_component_re}{}roamsx);
       if (! -d $parent_dir) {
-        print(STDERR '[Try to create '.$parent_dir.']'."\n") if ($debug);
+        prints(STDERR '[Try to create '.$parent_dir.']'."\n") if ($debug);
         mkdir($parent_dir);
       }
-      print(STDERR '[Try to create '.$dir.']'."\n") if ($debug);
+      prints(STDERR '[Try to create '.$dir.']'."\n") if ($debug);
       mkdir($dir);
       my ($rc) = mkdir($dir);
       if (-x $dir) { $cache_dir = $dir; last; }
@@ -51,7 +50,7 @@ BEGIN {
   }
 
   if (defined $cache_dir) {
-    print(STDERR '[Perl library cache dir is in '.$cache_dir.']'."\n") if ($debug);
+    prints(STDERR '[Perl library cache dir is in '.$cache_dir.']'."\n") if ($debug);
   }
 }
 
@@ -67,7 +66,7 @@ sub package_load_hook {
 
   $rc = sysopen($fd, $cache_dir.$package, 0);
   if ($rc) {
-    print(STDERR '[Used package '.$package.' ('.$relative_filename.') from '.$cache_dir.$package.']'."\n") if ($debug);
+    prints(STDERR '[Used package '.$package.' ('.$relative_filename.') from '.$cache_dir.$package.']'."\n") if ($debug);
     return (undef, $fd);
   }
     
@@ -87,7 +86,7 @@ sub package_load_hook {
   sysopen($fd, $found, 0)
     || die('Cannot load module '.$found);
 
-  print(STDERR '[Used package '.$package.' ('.$relative_filename.') from '.$found.']'."\n") if ($debug);
+  prints(STDERR '[Used package '.$package.' ('.$relative_filename.') from '.$found.']'."\n") if ($debug);
 
   if (defined $cache_dir) {
     symlink($found, $cache_dir.$package) ||
@@ -96,10 +95,10 @@ sub package_load_hook {
 
 #  my $prepend_source_code = 
 #    'BEGIN { my $self = $INC{\''.$relative_filename.'\'} // \'undef\'; '.
-#    'print(STDERR \'[Used package '.$relative_filename.' => '.$found.']\'."\\n"); '.
+#    'prints(STDERR \'[Used package '.$relative_filename.' => '.$found.']\'."\\n"); '.
 #    '}'."\n";
   return (undef, $fd);
-  # print(STDERR $prepend_source_code);
+  # prints(STDERR $prepend_source_code);
   # return (\$prepend_source_code, $fd);
   # return ($prepend_source_code, $file_handle_with_data, $source_line_generator_func, $state_to_pass_to_generator)
 }
