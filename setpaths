@@ -43,7 +43,7 @@ export PREVIOUS_MAKEFLAGS=$MAKEFLAGS
 export PREVIOUS_PS1=$PS1
 
 export SOURCEDIR=$(realpath $PWD)
-export BUILDDIR=$SOURCEDIR
+export BUILDDIR=$SOURCEDIR/build
 
 [[ ! $PATH =~ ^$SOURCEDIR/scripts: ]] && export PATH=$SOURCEDIR/scripts:$PATH
 [[ ! $PERLLIB =~ ^${SOURCEDIR}: ]] && export PERLLIB=$SOURCEDIR:$PERLLIB >& /dev/null

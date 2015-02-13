@@ -3,7 +3,7 @@
 #
 # perl-mod-deps-standalone
 #
-# Copyright 2014 Matt T Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2015 Matt T Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use integer; use warnings;

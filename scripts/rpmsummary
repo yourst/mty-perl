@@ -3,7 +3,7 @@
 #
 # rpmsummary
 #
-# Copyright 2003-2014 Matt T Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2003-2015 Matt T Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use integer; use warnings;
@@ -30,7 +30,7 @@ my %command_line_options = (
 
 my ($filenames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV);
 
-my $is_stdout_terminal = (-t STDOUT) ? 1 : 0;
+my $is_stdout_terminal = (stdout_is_terminal()) ? 1 : 0;
 $max_line_width //= ($is_stdout_terminal) ? get_terminal_width_in_columns() : undef;
 if ($unlimited_width) { $max_line_width = undef; }
 
@@ -65,4 +65,5 @@ while ($out =~ /$split_rpm_output_re/oamsxg) {
   push @table, [ $name_color.$name, $ver_color.$version, $description_color.$description ];
 }
 $max_line_width = undef;
-print_table(STDOUT, @table, colseps => '  ', row_prefix => '  ', align => [ALIGN_LEFT, ALIGN_RIGHT, ALIGN_LEFT]);
+print_table(STDOUT, @table, colseps => '  ', row_prefix => '  ', 
+  align => [ALIGN_LEFT, ALIGN_RIGHT, ALIGN_LEFT], wrap_above_max_col_widths => [0, 0, 100]);

@@ -3,7 +3,7 @@
 #
 # lls: Enhanced 'ls' for file and directory listings 
 #
-# Copyright 2003 - 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2003 - 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 use integer; use warnings; 
@@ -216,8 +216,8 @@ my %open_type_to_id = (
 );
 
 my %command_line_options = (
-  'p' => [ \@show_specific_pids, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [qw(pid pids)] ],
-  't' => [ \@show_open_types, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [qw(type types opentypes)], %open_type_to_id ],
+  'p' => [ \@show_specific_pids, OPTION_LIST, [qw(pid pids)] ],
+  't' => [ \@show_open_types, OPTION_LIST, [qw(type types opentypes)], %open_type_to_id ],
   'f' => [ \$fast_query, 0, [qw(fast skip-details no-details)] ],
   'd' => [ \$debug, 0, [qw(debug dump)] ],
 );

@@ -3,11 +3,12 @@
 #
 # perl-mod-deps:
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 # (See MTY/PerlModDeps/PerlModDeps.pm for documentation)
 #
 
+# use MTY::Common::ModuleCache;
 use MTY::PerlModDeps::Main;
 
 main(@ARGV);

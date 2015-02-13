@@ -3,10 +3,20 @@
 #
 # autogen-reverse-dns-and-dhcp
 #
-# Copyright 2008-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2008-2015 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use integer;
+use POSIX qw(strftime);
+
+sub prints {
+  print(STDOUT @_);
+}
+
+sub printfd($@) {
+  my ($fd, @args) = @_;
+  print($fd @args);
+}
 
 sub valid {
   my ($s) = @_;
@@ -35,10 +45,11 @@ sub print_error {
   exit(2);
 }
 
+$refresh_seq_number_mode = ($mode =~ /^-(?>refresh|update|seq|serial|time)/oax);
 $rdns_mode = ($mode eq "-rdns");
 $dhcp_mode = ($mode eq "-dhcp");
 
-if (!($rdns_mode || $dhcp_mode)) {
+if (!($rdns_mode || $dhcp_mode || $refresh_seq_number_mode)) {
   print_error('Unknown mode "'.$mode.'": must be one of -rdns or -dhcp');
 }
 
@@ -56,10 +67,13 @@ sub add_comment {
   $ip_to_comments{$ip} .= $comment;
 }
 
-$remove_comments_re = qr/^ ([^;]*) ; (.*) $/oax;
-$special_autogen_action_comment_re = qr/^ \s* \+\+AUTOGEN: \s+ (\S+) \s+ (.+)$/oax;
-$split_name_type_data_re = qr/^ (\S+) \s+ (?: IN \s+)? (\w+) \s+ (.+?) \s* $/oax;
-$include_re = qr/^ \s* \$INCLUDE \s+ (.+)$/oax;
+my $formatted_timestamp = strftime('%Y%m%d%H%M%S', localtime());
+
+$remove_comments_re = qr{^ ([^;]*) ; (.*) $}oax;
+$special_autogen_action_comment_re = qr{^ \s* \+\+AUTOGEN: \s+ (\S+) \s+ (.+)$}oax;
+$split_name_type_data_re = qr{^ \s*+ (\S++) \s++ (?> IN \s++)? (\w++) \s++ (.+?) \s* $}oax;
+$include_re = qr{^ \s* \$INCLUDE \s+ (.+)$}oax;
+$update_soa_serial_re = qr{^ \s*+ (\S++) \s*+ (?> IN \s++)? SOA \s++ (\S++) \s++ (\S++) \s*+ \( \s*+ \K (\d++)}oamsx;
 
 #
 # Specifying actions for autogen-reverse-dns-and-dhcp using special comments
@@ -260,7 +274,7 @@ prints("$comment_char\n".
       "$comment_char\n\n");
 
 if ($rdns_mode) {
-  $timestamp = time();
+  $timestamp = $formatted_timestamp;
   prints("\$TTL 4H\n" .
         '@ IN SOA '.$rdns_soa_ns.' '.$rdns_soa_email.' ('."\n" .
         '  '.$timestamp."\n".
@@ -306,4 +320,3 @@ if ($rdns_mode) {
 }
 
 exit(0);
-

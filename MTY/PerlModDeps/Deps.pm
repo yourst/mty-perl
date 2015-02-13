@@ -2,18 +2,19 @@
 #
 # MTY::PerlModDeps::Module
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::PerlModDeps::Deps;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 use MTY::Common::Common;
 use MTY::Common::Hashes;
 use MTY::Common::Strings;
 use MTY::Filesystem::Files;
 use MTY::Display::Colorize;
+use MTY::Display::ColorCapabilityCheck;
 use MTY::Display::ColorizeErrorsAndWarnings;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;

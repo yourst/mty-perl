@@ -12,7 +12,7 @@
 # .bashrc, .profile or similar shell scripts. The colorized output will
 # automatically be piped through 'less'.
 #
-# Copyright 2003-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2003-2015 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use integer; use warnings;
@@ -92,15 +92,16 @@ my $heading_number = 0;
 
 my $heading_tab_outline_color = fg_color_rgb(160, 40, 216);
 
-$man_top_subject_and_section_re = qr{^ ([\w\-\:]+) \( (\d\w*) \) \s+}oax;
-$man_heading_re = qr{^ \e\[1m ([A-Z][A-Z0-9\ ]*) \e\[0m $}oax;
+$man_top_subject_and_section_re = qr{^ ([\w\-\:]+) \( (\d \w*) \) \s+}oax;
+$man_heading_re = qr{^ \e \[ 1m ([A-Z][A-Z0-9\ ]+) \e \[ 0m $}oax;
+$man_subheading_re = qr{^ (\s+) \e \[ 1m ([^\e]+) \e \[ 0m $}oax;
 
 my $seen_top = 0;
 my $accum_blank_lines = 0;
 my $cols = get_terminal_width_in_columns();
 
-#write_file('/tmp/man-page-dump', read_file_handle(STDIN_FD));
-#exit 0;
+# write_file('/tmp/man-page-dump', read_file_handle(STDIN_FD));
+# exit 0;
 
 my @man_page_lines = <STDIN>; #read_file_handle(STDIN_FD);
 
@@ -127,9 +128,13 @@ foreach (@man_page_lines) {
     my $tab_outline_color = $man_heading_to_text_color{$heading} // $C;
     $heading = ucfirst(lc($heading));
     printfd($lessfd, print_folder_tab($tab_text_color.$heading.X, $tab_outline_color, ALIGN_LEFT));
+  } elsif (/$man_subheading_re/oax) {
+    my ($indent, $subheading) = ($1, $2);
+    $indent = max(length($indent) - 1, 0);
+    printfd($lessfd, (' ' x $indent).G_2_3.arrow_tri.' '.G.U.$subheading.UX.G_1_2.' '.(dashed_horiz_bar_2_dashes x ($cols - ($indent + length($subheading) + 4))).NL.NL);
   } else {
     my $out = $_ 
-      =~ s{' ($inside_single_quoted_string_nocap_re) '}{${left_single_quote}${1}${right_single_quote}}roaxg
+      =~ s{' ($inside_single_quoted_re) '}{${left_single_quote}${1}${right_single_quote}}roaxg
       =~ s{" ($inside_double_quoted_re) "}{${left_quote}${1}${right_quote}}roaxg
       =~ s{\S \K \( (\d\w*+) \)}{format_man_section($1)}roaxge
       =~ s{^\s{7}}{    }roax

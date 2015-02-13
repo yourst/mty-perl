@@ -7,8 +7,10 @@
 # extended attributes and more, all in beautiful color coded style
 # to integrate all this information into one easy to read listing!
 #
-# Copyright 2003 - 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2003 - 2015 Matt T. Yourst <yourst@yourst.com>
 #
+
+# use MTY::Common::ModuleCache;
 
 use integer; use warnings; 
 
@@ -17,6 +19,7 @@ use MTY::Common::Common;
 use MTY::Common::Hashes;
 use MTY::Common::Strings;
 use MTY::Common::CommandLine;
+use MTY::Common::Misc;
 
 use MTY::Filesystem::Files;
 use MTY::Filesystem::PathCache;
@@ -985,7 +988,8 @@ sub format_extents(+) {
       $out .= $extents_color.(($inlined_bytes > 0) ? 'inline' : (' ' x 6)).(($tail_bytes > 0) ? 'tail  ' : (' ' x 6));
     } else {
       $out .= ($unwritten_bytes > 0) ? $extents_color.padstring($unwritten_percent, -3).$extents_shaded_color.' %U' : (' ' x 6);
-      $out .= ($shared_percent > 0) ? $extents_color.padstring($shared_percent, -3).$extents_shaded_color.' %C' : (' ' x 6);
+      $out .= ($shared_percent > 0) ? (($shared_bytes == $file_size) ? $extents_color.'cloned' :
+                                         $extents_color.padstring($shared_percent, -3).$extents_shaded_color.' %C') : (' ' x 6);
     }
 
     return $out;
@@ -1057,11 +1061,16 @@ my %command_line_options = (
   'column-headers' => [ \$print_column_headers, OPTION_TOGGLE_BOOL, [qw(colhdrs column-headers)] ],
   'combine-uid-gid' => [ \$combine_common_uid_gid, OPTION_TOGGLE_BOOL, [ 'comxid' ] ],
   'dir-and-parent' => [ \$show_dot_and_dot_dot, OPTION_TOGGLE_BOOL, [qw(. show-.-and-.. .-.. .-and-.. dot-and-dot-dot)] ],
-# 'search' => [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED|OPTION_COMMA_SEP_LISTS|OPTION_APPEND_REPEATS, [qw(grep find)] ],
   'and' => [ \&match_all_patterns, 0, [ '&' ] ],
   'or' => [ \&match_any_patterns, 0, [ '|' ] ],
-  'shaded-color-coeff' => [ \$shaded_color_coeff, OPTION_VALUE_REQUIRED, [qw(shading shade dark darkness contrast)] ],
+  'shaded' => [ \$shaded_color_coeff, OPTION_VALUE_REQUIRED, [qw(shading shade dark darkness contrast)] ],
+# 'search' => [ \&set_field_search_pattern, OPTION_LIST, [qw(grep find)] ],
 );
+
+while (my ($field, $index) = each %stat_field_name_to_index_map) {
+  $command_line_options{'in-'.$field} = [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED, [ ], [ $index, 0 ] ];
+  $command_line_options{'not-'.$field} = [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED, [ ], [ $index, 1 ] ];
+}
 
 my @command_line_options_help = (
   [ OPTION_HELP_LITERAL ] => print_banner('lls', 'Enhanced File Listings'),
@@ -1100,7 +1109,7 @@ my @command_line_options_help = (
   'comma' => 'Insert commas (every three decimal digits) into file sizes and other large integers',
   'digits' => 'Maximum number of decimal digits to show in large file sizes before scaling by next power of 1024',
   'human-readable' => 'Human readable file sizes, abbreviated with Kb/Mb/Gb/Tb/etc units',
-  'shaded-color-coeff' => 'Brightness of darker shaded RGB colors relative to corresponding normal colors',
+  'shaded' => 'Brightness of darker shaded RGB colors relative to corresponding normal colors',
 
   [ OPTION_HELP_CATEGORY, M_2_3 ] => M.'Symbolic links',
 
@@ -1109,18 +1118,13 @@ my @command_line_options_help = (
 
   [ OPTION_HELP_CATEGORY, R_2_3 ] => R.'Filtering matching values within specific fields',
 
-  (map { 'in-'.$_ => 'Show items where the '.M.$_.X.' field\'s value matches the specified value (numerical or string, depending on the field)' } sort keys %stat_field_name_to_index_map),
-  (map { 'not-'.$_ => 'Show items where the '.M.$_.X.' field\'s value matches the specified value (numerical or string, depending on the field)' } sort keys %stat_field_name_to_index_map),
+  # (map { 'in-'.$_ => 'Show items where the '.M.$_.X.' field\'s value matches the specified value (numerical or string, depending on the field)' } sort keys %stat_field_name_to_index_map),
+  # (map { 'not-'.$_ => 'Show items where the '.M.$_.X.' field\'s value matches the specified value (numerical or string, depending on the field)' } sort keys %stat_field_name_to_index_map),
   'and' => 'Boolean intersection (AND) of the options (e.g. '.M.'-in-'.elipsis_three_dots.X.' ++before and after this option',
   'or' => 'Boolean union (OR) of the options (e.g. '.M.'-in-'.elipsis_three_dots.X.' ++before and after this option',
   # 'not' => 'Boolean inverse (NOT) of associated option (e.g. '.M.'-in-'.elipsis_three_dots.X.' ++before and after this option',
   # 'xor' => 'Boolean intersection (AND) of the options (e.g. '.M.'-in-'.elipsis_three_dots.X.' ++before and after this option',
 );
-
-while (my ($field, $index) = each %stat_field_name_to_index_map) {
-  $command_line_options{'in-'.$field} = [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED, [ $field.'?' ], [ $index, 0 ] ];
-  $command_line_options{'not-'.$field} = [ \&set_field_search_pattern, OPTION_VALUE_REQUIRED, [ 'not-'.$field.'?' ], [ $index, 1 ] ];
-}
 
 use constant {
   heavy_intersection_4_way => chr(0x254b),
@@ -1229,7 +1233,7 @@ sub main(@) {
   # line options may override any options set in LS_OPTIONS:
   #
   
-  my ($pathargs, $invalid_option_indexes) = 
+  my ($pathargs, $invalid_option_indexes, $option_values) = 
     parse_and_check_command_line(%command_line_options, @args, @command_line_options_help);
 
   # If no arguments were specified, use the current directory
@@ -1259,7 +1263,7 @@ sub main(@) {
     my $dirname = resolve_path($orig_dirname);
 
     if (!defined $dirname) {
-      simple_warning('Directory '.format_quoted($orig_dirname). ' does not exist');
+      warning('Directory '.format_quoted($orig_dirname). ' does not exist');
       next;
     }
 
@@ -1269,7 +1273,7 @@ sub main(@) {
       $dirfd = sys_open_path($dirname);
 
       if (!defined $dirfd) {
-        simple_warning('Cannot access directory '.format_quoted($dirname));
+        warning('Cannot access directory '.format_quoted($dirname));
         next;
       }
 
@@ -1287,7 +1291,7 @@ sub main(@) {
     my $stats = get_file_stats($filename, $dirfd, $follow_symlinks_on_command_line);
 
     if (!defined $stats) {
-      simple_warning('Cannot access '.format_quoted($path));
+      warning('Cannot access '.format_quoted($path));
       next;
     }
 
@@ -1306,7 +1310,7 @@ sub main(@) {
       my $dirname = resolve_path($orig_dirname);
 
       if (!defined $dirname) {
-        simple_warning('Directory '.format_quoted($orig_dirname). ' does not exist');
+        warning('Directory '.format_quoted($orig_dirname). ' does not exist');
         next;
       }
 
@@ -1316,7 +1320,7 @@ sub main(@) {
         $dirfd = sys_open_path($dirname);
 
         if (!defined $dirfd) {
-          simple_warning('Cannot access directory '.format_quoted($dirname));
+          warning('Cannot access directory '.format_quoted($dirname));
           next;
         }
 

@@ -2,12 +2,12 @@
 #
 # MTY::PerlModDeps::Exports
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::PerlModDeps::Exports;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 use MTY::Common::Common;
 use MTY::Common::Hashes;

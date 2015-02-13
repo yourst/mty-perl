@@ -1,0 +1,232 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# perlsubs: Perl subroutine listing and manipulation utility
+#
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
+#
+# The perlsubs program:
+# 
+# - Prints a list of all subroutine definitions found in the specified
+#   Perl module or program source file(s)
+#
+# - Prints the actual code within the specified subroutine(s) in the
+#   specified source files
+#
+# - Moves the specified subroutine(s) between two source files
+#
+
+use integer; use warnings;
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Common::Strings;
+use MTY::Common::CommandLine;
+use MTY::Common::Misc;
+use MTY::Filesystem::Files;
+use MTY::Display::Colorize;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::Table;
+use MTY::RegExp::PerlSyntax;
+use MTY::RegExp::Tools;
+use MTY::RegExp::Strings;
+use MTY::RegExp::Blocks;
+use MTY::RegExp::PerlSyntax;
+use MTY::RegExp::Numeric;
+
+my @specified_sub_names;
+my $show_prototypes = undef;
+my $show_attributes = undef;
+my $show_filenames = undef;
+my $show_lines = undef;
+my $show_offsets = 0;
+my $show_packages = 0;
+my $show_code = 0;
+my $verbose = 0;
+my $show_as_table = 1;
+my $sort_by_name = 0;
+my $remove_subs = 0;
+my $show_anonymous_subs = 0;
+
+my %command_line_options = (
+  'sub' => [ \@specified_sub_names, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ qw(s print-sub) ] ],
+  'protos' => [ \$show_prototypes, 0, [ qw(p proto prototypes) ] ],
+  'attrs' => [ \$show_attributes, 0, [ qw(a attr attributes) ] ],
+  'filenames' => [ \$show_filenames, 0, [ qw(f files) ] ],
+  'lines' => [ \$show_lines, 0, [ qw(l) ] ],
+  'offsets' => [ \$show_offsets, 0, [ ] ],
+  'packages' => [ \$show_packages, 0, [ qw(q qualified-names packages pkg modules mods) ] ],
+  'code' => [ \$show_code, 0, [ qw(c b body source) ] ],
+  'verbose' => [ \$verbose, 0, [ qw(v) ] ],
+  'table' => [ \$show_as_table, 0, [ qw(t) ] ],
+  'sort' => [ \$sort_by_name, 0, [ qw(S n sort-by-name) ] ],
+  'remove' => [ \$remove_subs, 0, [ qw(r d delete without strip) ] ],
+  'anon' => [ \$show_anonymous_subs, 0, [ qw(anonymous anon-subs) ] ],
+  META_OPTION_NON_OPTIONS_REQUIRED, 1,
+);
+
+my @command_line_options_help = (
+  [ OPTION_HELP_BANNER ] => 'Show subroutines in Perl source code or remove specified subs',
+
+  [ OPTION_HELP_CATEGORY, Y_2_3, ] => Y.'General Options',
+  'sub' => 'Print the declarations and bodies of the specified subroutine(s) or them remove if -remove is given',
+  'remove' => 'Print the full contents of the specified files *except* for the specified subroutines',
+  'table' => 'Show the selected fields as a color coded table instead of simple text output',
+  'sort' => 'Sort the subroutines within each file by their names',
+  'anon' => 'Include anonymous subroutines',
+
+  [ OPTION_HELP_CATEGORY, G_2_3 ] => G.'Fields to Display',
+  'protos' => 'Show prototypes (if present) of the listed subroutines',
+  'attrs' => 'Show attributes (if present) of the listed subroutines',
+  'filenames' => 'Show which source file defines each listed subroutine',
+  'lines' => 'Show the line and column in each source file where each subroutine is defined',
+  'offsets' => 'Show the byte offset in each source file where each subroutine is defined',
+  'packages' => 'Show fully qualified subroutine names including the package name',
+  'code' => 'Show the code within the body of each subroutine',
+  [ OPTION_HELP_SPACER ] => '',
+  'verbose' => 'Show all of the information above (except for the code) for each subroutine',
+);
+
+my ($filenames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
+my %specified_sub_names = (map { $_ => 1 } @specified_sub_names);
+
+my $sn = ((scalar @specified_sub_names) || $verbose || $show_code) ? 1 : 0;
+
+$show_prototypes //= $sn;
+$show_attributes //= $sn;
+$show_filenames //= (!$show_code) && ($sn || ((scalar @$filenames) > 1));
+$show_lines //= (!$show_code) && $sn;
+
+$show_as_table = 0 if ($show_code || (!($show_prototypes || $show_attributes || $show_filenames || $show_lines)));
+
+my $perl_subs_ignore_non_code_re = 
+  qr{(?|
+       (?> ( ) (?> $strip_non_functional_perl_syntax_re)) |
+       $perl_package_decl_re |
+       $perl_sub_decl_and_body_re
+     )}oamsx;
+
+my %filename_to_subs;
+my %sub_to_info;
+
+my $anonymous_sub_counter = 0;
+
+foreach my $filename (@$filenames) {
+  my $subs_in_file = [ ];
+
+  if ($filename eq '-') { $filename = '/dev/stdin'; }
+
+  my $code = read_file($filename);
+
+  if (!defined $code) {
+    warning('Cannot read file "'.$filename.'"; skipping');
+    next;
+  }
+
+  if ($remove_subs) {
+    $code =~ s{($perl_subs_ignore_non_code_re)}{
+      my ($match, $keyword, $name) = ($1, $2, $3);
+      my $keep = 
+        (!length $keyword) || # pass through all comments, strings, etc.
+        ($keyword eq 'package'); # pass through package declarations
+
+      my $remove_sub =
+        ($keyword eq 'sub') && (length $name) &&
+        ((!scalar @specified_sub_names) ||
+         (exists $specified_sub_names{$name}));
+
+      printfd(STDERR, 'keyword=[', $keyword, '], name=[', $name, ']: k ', ($keep?1:0), ', r ', ($remove_sub?1:0), NL);
+      ((!$keep) && ($remove_sub)) ? '<removed>' : $match;
+    }oamsxge;
+
+    print('# '.$filename.NL) if ((scalar @$filenames) > 1);
+    print($code);
+    next;
+  }
+
+  my $line_to_offset_map = ($show_lines) 
+    ? create_line_offset_map($code) : undef;
+
+  my $package = 'main';
+
+  while ($code =~ /$perl_subs_ignore_non_code_re/oamsxg) {
+    my ($keyword, $name, $proto, $attrs, $body) = ($1, $2, $3, $4 // '', $5 // '');
+
+    next if (!length $keyword);
+
+    if ($keyword eq 'package') { $package = $name; next; }
+
+    my $offset = $-[0];
+
+    if (!length $name) {
+      next if (!$show_anonymous_subs);
+      $name = 'anonymous_sub_'.$anonymous_sub_counter++;
+    }
+
+    my ($line, $col) = (defined $line_to_offset_map) 
+      ? find_line_containing_offset($code, $offset, $line_to_offset_map) : ( );
+
+    my $info = [ $name, $proto, $attrs, $body, $package, $filename, $offset, $line // 0, $col // 0 ];
+    push @$subs_in_file, $info;
+    $sub_to_info{$name} = $info;
+  }
+
+  $filename_to_subs{$filename} = $subs_in_file;
+}
+
+my @table = ( );
+
+while (my ($filename, $subs) = each %filename_to_subs) {
+  if ($sort_by_name) 
+    { $subs = [ sort { $a->[0] cmp $b->[0] } @$subs ]; }
+
+  foreach my $info (@$subs) {
+    my ($name, $proto, $attrs, $body, $package, $filename, $offset, $line, $col) = @$info;
+
+    next if ((@specified_sub_names) && (!exists $specified_sub_names{$name}));
+
+    if ($show_as_table) {
+      my @row = ( $name );
+      push @row, ((defined $proto) ? '('.$proto.')' : '') if ($show_prototypes);
+
+      if ($show_attributes) {
+        my @attrs = split(/[\s\:]++/, $attrs);
+        push @row, join('', map { ' :'.$_ } @attrs);
+      }
+
+      push @row, $package if ($show_packages);
+      push @row, $filename if ($show_filenames);
+      push @row, $line if ($show_lines);
+      push @row, $offset if ($show_offsets);
+      push @table, [ @row ];
+    } else {
+      my $out = '';
+
+      $out .= 'sub ' if ($show_code);
+      $out .= $package.'::' if ($show_packages);
+      $out .= $name;
+      $out .= ' ' if ($show_prototypes && (defined $proto) && !$show_code);
+      $out .= '('.$proto.')' if ($show_prototypes && (defined $proto));
+      
+      if ($show_attributes) {
+        my @attrs = split(/[\s\:]++/, $attrs);
+        $out .= join('', map { ' :'.$_ } @attrs);
+      }
+      
+      $out .= ' {' if ($show_code);
+      if ($show_filenames || $show_lines || $show_offsets) {
+        $out .= ' #' if ($show_code);
+        $out .= ' in '.$filename if ($show_filenames);
+        $out .= ' @ '.$line if ($show_lines);
+        $out .= ' (offset '.$offset.')' if ($show_offsets);
+      }
+      
+      $out .= $body.'}'.NL if ($show_code);
+      $out .= NL;
+      
+      prints($out);
+    }
+  }
+}
+
+if ($show_as_table) { print_table(STDOUT, @table, colseps => '  '); }

@@ -4,7 +4,7 @@
 # Colorize gcc errors and warning messages
 # (inspired by colorgcc, but more straightforward and flexible)
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 use MTY::Common::Common;
@@ -41,7 +41,7 @@ if ($settings =~ /\b (nocolor|off|disable)/oamsx) {
 
 # If it's in the list of terminal types not to color, or if
 # we're writing to something that's not a tty, don't do color.
-if (! -t STDERR || ($terminal eq 'dumb') || $disabled) {
+if (! stderr_is_terminal() || ($terminal eq 'dumb') || $disabled) {
   while (<STDIN>) {
     printfd(STDERR, $_);
   }

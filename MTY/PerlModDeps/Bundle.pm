@@ -2,12 +2,12 @@
 #
 # MTY::PerlModDeps::Exports
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::PerlModDeps::Bundle;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 use MTY::Common::Common;
 use MTY::Common::Hashes;
@@ -79,7 +79,7 @@ sub generate_module_bundle(+$) {
     if ($bundle_name =~ /::([^:]++)$/oax) {
       $default_bundle_name = $1;
     } else {
-      simple_warning('Cannot derive default bundle name from '.
+      warning('Cannot derive default bundle name from '.
         'specified -bundle='.$bundle_name.' option; assuming "All"');
     }
 
@@ -220,7 +220,7 @@ sub generate_module_bundle(+$) {
   $generated_export_ok_decl .= ');'.NL.NL;
   
   $out .= 
-    NL.'use Exporter::Lite;'.NL.'nobundle:; preserve:; '.
+    NL.'use Exporter qw(import);'.NL.'nobundle:; preserve:; '.
       $generated_export_decl.NL.
       $generated_export_ok_decl.NL;
 

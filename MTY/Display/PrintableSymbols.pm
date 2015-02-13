@@ -29,7 +29,7 @@
 
 package MTY::Display::PrintableSymbols;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 our @EXPORT;
 our %symbols;
@@ -44,7 +44,15 @@ BEGIN {
   formfeed => "\f",
   esc => "\e",
   space => ' ',
-  zero_space => chr(0x200b),
+  non_breaking_space => chr(0xa0),
+  nbsp => chr(0xa0),
+  en_space => chr(0x2002),
+  em_space => chr(0x2003),
+  fig_space => chr(0x2007),
+  punc_space => chr(0x2008),
+  thin_space => chr(0x2009),
+  hair_space => chr(0x200a),
+  zero_space => chr(0x200b),  
 
   small_left_barbed_arrow => chr(0x2190),
   small_up_barbed_arrow => chr(0x2191),
@@ -52,18 +60,22 @@ BEGIN {
   small_down_barbed_arrow => chr(0x2193),
   left_arrow_tri => chr(0x25c0),
   left_arrow_open_tri => chr(0x25c1),
+  alt_left_arrow_open_tri => chr(0x140a),
   left_arrow_bold => chr(0x2b05),
   up_arrow_tri => chr(0x25b2),
   up_arrow_open_tri => chr(0x25b3),
+  alt_up_arrow_open_tri => chr(0x1403),
   up_arrow_bold => chr(0x2b06),
   down_arrow_tri => chr(0x25bc),
   down_arrow_open_tri => chr(0x25bd),
+  alt_down_arrow_open_tri => chr(0x1401),
   down_arrow_bold => chr(0x2b07),
   arrow_tri_small => chr(0x2023),
   arrow_tri => chr(0x25b6),
   arrow_medium_tri => chr(0x25b8),
   arrow_medium_open_tri => chr(0x25b9),
   arrow_open_tri => chr(0x25b7),
+  alt_right_arrow_open_tri => chr(0x1405),
   arrow_tri_large => chr(0x25ba),
   arrow_barbed => chr(0x279c),
   large_arrow_barbed => chr(0x2794),
@@ -93,9 +105,14 @@ BEGIN {
   left_quote => chr(0x201c), # stylized typographical left double quote (variant of ")
   left_single_quote => chr(0x2018), # stylized typographical left single quote (variant of ')
   left_angle_quote => chr(0x00ab), # a.k.a left guillemet as in french quotations
+  bold_left_quote => chr(0x275d),
+  bold_left_single_quote => chr(0x275b),
+
   round_bold_left_paren => chr(0x2768),
   flat_bold_left_paren => chr(0x276a),
   double_left_paren => chr(0xff5f),
+  light_left_paren => chr(0xfd3e),
+  light_right_paren => chr(0xfd3f),
   bold_left_angle_bracket => chr(0x276c),
   alt_bold_left_angle_bracket => chr(0x276e),
   extra_bold_left_angle_bracket => chr(0x2770),
@@ -111,10 +128,17 @@ BEGIN {
   wide_left_square_bracket => chr(0xff3b),
   wide_left_brace => chr(0xff5b),
   small_upper_left_corner_bracket => chr(0xff62),
+  alt_upper_left_corner => chr(0x14a5),
+  alt_upper_right_corner => chr(0x14a3),
+  alt_lower_left_corner => chr(0x14aa),
+  alt_lower_right_corner => chr(0x14a7),
 
   right_quote => chr(0x201d), # stylized typographical right double quote (variant of ")
   right_single_quote => chr(0x2019), # stylized typographical right single quote (variant of ')
   right_angle_quote => chr(0x00bb), # a.k.a left guillemet as in french quotations
+  bold_right_quote => chr(0x275e),
+  bold_right_single_quote => chr(0x275c),
+
   round_bold_right_paren => chr(0x2769),
   flat_bold_right_paren => chr(0x276b),
   double_right_paren => chr(0xff60),
@@ -142,7 +166,7 @@ BEGIN {
   copyright_symbol => chr(0x00a9), # copyright symbol ("(c)" inside circle)
   reg_tm_symbol => chr(0x00ae), # registered trademark symbol ("(r)" inside circle)
   trademark_tm_symbol => chr(0x2122), # trademark symbol (superscript "tm")
-
+  rx_symbol => chr(0x211e), # Rx (prescription) symbol 
   exclaimation_point => chr(0x2757), # bold ! symbol
   inverted_exclaimation => chr(0x00ab), # upside down exclamation point (!) as in spanish
   inverted_question_mark => chr(0x00bf), # upside down question mark (?) as in spanish
@@ -151,6 +175,10 @@ BEGIN {
   section_symbol => chr(0x00a7), # section symbol ("s" with open circle in middle)
   elipsis_three_dots => chr(0x2026),
   large_pound_sign => chr(0xff03),
+  large_dollar_sign => chr(0xff04),
+  large_percent_sign => chr(0xff05),
+  large_ampersand_sign => chr(0xff06),
+  large_asterisk => chr(0xff0a),
   sharp_sign => chr(0x266f),
   star => chr(0x2605), # five pointed star (not an asterisk)
   asterisk => chr(0x273b), # asterisk (six rounded lobes) in typographical style
@@ -158,7 +186,29 @@ BEGIN {
   eight_point_asterisk => chr(0x274b), # eight pointed (actually rounded lobes) asterisk
   double_colon => chr(0x2836), # '::' in one character
   light_double_colon => chr(0x589).chr(0x589),
-  
+  small_double_colon => chr(0x16ec).chr(0x16ec),
+  very_light_double_colon => chr(0xfe30),
+  heavy_colon => chr(0x254f),
+  inverted_square_u => chr(0x3a0), # capital greek pi
+  small_u => chr(0x3c5), # lowercase greek upsilon
+  delta_up_tri => chr(0x394), # uppercase greek delta
+  large_u => chr(0x144c),
+  large_v => chr(0x142f),
+  large_gt => chr(0x1433),
+  large_lt => chr(0x1438),
+  large_inverted_u => chr(0x144e),
+  large_c => chr(0x1450),
+  large_inverted_c => chr(0x1455),
+  large_j => chr(0x148d),
+  superscript_s => chr(0x1506),
+  superscript_j => chr(0x14a2),  
+  superscript_l => chr(0x14bb),
+  superscript_u => chr(0x14d1),
+  superscript_x => chr(0x1541),
+  superscript_v => chr(0x1601),
+  superscript_z => chr(0x1646),
+  large_rotated_m => chr(0x1552),
+
   star_with_8_points => chr(0x2734), # eight pointed star with deep points
   star_with_6_points => chr(0x2736), # eight pointed star with deep points
   star_with_8_medium_points => chr(0x2737), # eight pointed star with medium points
@@ -168,9 +218,12 @@ BEGIN {
 
   dot => chr(0x2022), # medium sized dot
   dot_small => chr(0x00b7), # small sized dot
+  tiny_dot => chr(0x0387),
+  alt_tiny_dot => chr(0x1427),
   bullet_small => chr(0x2219),
   large_dot => chr(0x26ab),
   large_open_dot => chr(0x26aa),
+  alt_open_dot => chr(0x03bf),
   open_dot => chr(0x26ac),
   two_linked_open_dots => chr(0x26af),
   large_plus => chr(0x271a),
@@ -178,6 +231,7 @@ BEGIN {
   times_symbol => chr(0x2715),
   multiplied_by => chr(0x2715),
   large_circle => chr(0x3007),
+  medium_circle => chr(0x039f),
   circle_with_shadow => chr(0x274d),
 
   checkmark => chr(0x2714), # checkmark symbol
@@ -209,6 +263,7 @@ BEGIN {
   reversed_e => chr(0x2108),
   deg_f => chr(0x2109),
   script_h => chr(0x210b),
+  italic_lowercase_h => chr(0x210e),
   script_l => chr(0x2112),
   script_small_l => chr(0x2113),
   script_h => chr(0x210b),
@@ -227,7 +282,7 @@ BEGIN {
   script_m => chr(0x2133),
   big_k => chr(0x212a),
   double_struck_sigma => chr(0x2140),
-
+  sigma => chr(0x03a3),
   long_heavy_vert_bar => chr(0x2503),
   long_narrow_vert_bar => chr(0x2502),
   long_narrow_double_vert_bars => chr(0x2551),
@@ -271,6 +326,14 @@ BEGIN {
   small_roman_numeral_d =>    chr(0x217e),
   small_roman_numeral_m =>    chr(0x217f),
 
+  ff_ligature => chr(0xfb00),
+  fi_ligature => chr(0xfb01),
+  fl_ligature => chr(0xfb02),
+  ae_ligature => chr(0xe6),
+  capital_ae_ligature => chr(0xc6),
+  capital_oe_ligature => chr(0x152),
+  oe_ligature => chr(0x153),
+
   dashed_horiz_bar_2_dashes => chr(0x254c),
   dashed_horiz_bar_3_dashes => chr(0x2504),
   dashed_horiz_bar_4_dashes => chr(0x2508),
@@ -284,6 +347,8 @@ BEGIN {
   dotted_vert_bar_4_dots => chr(0x2847),
   dotted_vert_bar_3_heavy_dots => chr(0x2507),
   dotted_vert_bar_4_heavy_dots => chr(0x250b),
+  dotted_vert_bar_3_tiny_dots => chr(0x1367),
+  dotted_vert_bar_2_tiny_dots => chr(0x16ec),
 
   normal_dash => chr(ord('-')),
   left_half_dash => chr(0x2574),
@@ -297,11 +362,16 @@ BEGIN {
   large_left_slash => chr(0x2572),
   split_right_slash => chr(0x2215),
   three_right_slashes => chr(0x2425),
+  medium_left_slash => chr(0x3035),
+  medium_right_slash => chr(0x3033),
 
   a_slash_c => chr(0x2100),
   a_slash_s => chr(0x2101),
   c_slash_o => chr(0x2105),
   c_slash_u => chr(0x2106),
+
+  acute_accent => chr(0x141f),
+  grave_accent => chr(0x1420),
 
   ellipse_divided_by_vert_line => chr(0x2180),
 
@@ -367,6 +437,7 @@ BEGIN {
   x_in_triangle => chr(0x2a3b),
 
   four_diamonds => chr(0x2756),
+  small_four_diamonds => chr(0x700),
   open_diamond => chr(0x2662),
   diamond => chr(0x2666),
 
@@ -444,7 +515,7 @@ BEGIN {
   fraction_3_4 => chr(0x00be), # stylized 1/4 fraction'),
 
   # Multi-character composite symbols:
-  long_bold_right_arrow => chr(0x2015).chr(0x25b6),
+  long_bold_right_arrow => chr(0x2500).chr(0x25b6),
   long_bold_right_arrow_double_line => chr(0x2550).chr(0x25b6),
   long_bold_right_arrow_heavy_line => chr(0x2501).chr(0x25b6),
   wide_square_root_symbol => chr(0x221a).chr(0xffe3),

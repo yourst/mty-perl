@@ -7,6 +7,8 @@ $total_login_count = 0;
 @users = split(/\s+/, $who);
 %unique_users = ();
 
+sub prints { print(STDOUT join('', @_)); }
+
 foreach $user (@users) {
   if (!exists($unique_users{$user})) {
     $unique_users{$user} = 1;

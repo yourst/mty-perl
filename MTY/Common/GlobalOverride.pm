@@ -12,7 +12,7 @@
 #     ...
 #  );
 #
-# Copyright 1997 - 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 1997 - 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::Common::GlobalOverride;

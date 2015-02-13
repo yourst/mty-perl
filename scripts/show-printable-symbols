@@ -3,7 +3,7 @@
 #
 # show-printable-symbols
 #
-# Copyright 2003 - 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2003 - 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 use integer; use warnings;
@@ -11,6 +11,7 @@ use integer; use warnings;
 use MTY::Common::Common;
 use MTY::Common::Hashes;
 use MTY::Common::Strings;
+use MTY::Common::CommandLine;
 use MTY::Filesystem::Files;
 use MTY::Display::Colorize;
 use MTY::Display::ColorizeErrorsAndWarnings;
@@ -18,7 +19,9 @@ use MTY::Display::TextInABox;
 use MTY::Display::Scrollable;
 use MTY::Display::PrintableSymbolTools;
 use MTY::Display::PrintableSymbols;
+use MTY::Display::Table;
 use MTY::RegExp::Tools;
+use MTY::RegExp::Strings;
 use MTY::RegExp::PerlSyntax;
 use MTY::RegExp::Numeric;
 
@@ -39,7 +42,7 @@ my $repeat_count = 1;
 # by default, if the specified character name is exactly matched,
 # only print that single character. Otherwise print any character
 # names containing the specified name as a substring.
-my $show_all_wildcard_matches = 0;
+my $show_all_wildcard_matches = 1;
 my $show_utf8 = 1;
 
 my %char_id_to_name = ( );
@@ -67,11 +70,16 @@ sub expand_sym_list(+) {
 
   my %sym_set = ( );
 
-  my $re = join('|', map { ($show_all_wildcard_matches) ? $_ : '\A'.$_.'\Z' } grep { $_ =~ /$perl_identifier_re/oax } @$initial_list);
+  my $re = join('|', map {
+    my $expr = ($_ =~ /\A $perl_identifier_re \Z/oax) ? $_ :
+      ($_ =~ /\A \/ ([^\/]++) \/ \Z/oax) ? $1 : undef;
+    ((defined $expr) ? '(?>'.$expr.')' : ( ))
+  } @$initial_list);
+  if (!$show_all_wildcard_matches) { $re = '\A(?>'.$re.')\Z'; }
   $re = qr{$re}oax;
 
   foreach my $name (@$initial_list) {
-    if ($name =~ /^[A-Za-z_]\w*$/) {
+    if ($name =~ /\A [A-Za-z_\/]/oax) {
       if ((exists $symbols{$name}) && (!$show_all_wildcard_matches)) {
         $sym_set{$name} = [ $name, $symbols{$name}, FOUND_EXACT_NAME ];
       } else {
@@ -115,10 +123,9 @@ sub show_all_printable_symbols(;+$) {
     set_max($max_name_len, length($name));
   }
 
-  printfd($outfd, NL.$G.$U.'Showing '.$C.(scalar @sym_list).$G.' printable Unicode symbols:'.$X.NL.NL);
+  my $out = NL.$G.$U.'Showing '.$C.(scalar @sym_list).$G.' printable Unicode symbols:'.$X.NL.NL;
 
-  my $format = W.' %s '.TAB.'%s'.'%-'.$max_name_len.'s'.B.'  ['.
-    G.'0x%04x'.B.']%s  '.B.' = '.M.'%-12s'.B.'  '.K.'='.X.'  ';
+  my @table = ( [ map { C.U.$_.X } ('Glyph'.X.TAB, 'Name', 'Unicode', 'UTF-8', 'Glyph', 'Composition') ] );
 
   foreach my $info (@sym_list) {
     my ($name, $symbol, $found_by) = @$info;
@@ -127,25 +134,33 @@ sub show_all_printable_symbols(;+$) {
     my $utf8_encoding = join('', map { sprintf(K.'\\'.M.'%-3o', ord($_)) } @utf8_chars);
     # Don't literally print the escape character, since it may screw up the terminal state:
     if (ord($symbol) == 0x1B) { $symbol = chr(0x2400 + ord($symbol)); }
-    printf($outfd $format, $symbol, $found_by_to_color[$found_by], $name, ord($symbol), 
-           ((length($symbol) > 1) ? $R.large_plus.' '.$X : $X.'  '), $utf8_encoding);
-    printfd($outfd, $symbol x $repeat_count);
+    my $row = [
+      CLEAR_LINE.W.$symbol.TAB,
+      $found_by_to_color[$found_by].$name,
+      K_3_4.double_left_angle_bracket.G_2_3.'0x'.G.sprintf('%04x', ord($symbol)).K_3_4.double_right_angle_bracket.
+        ((length($symbol) > 1) ? R.large_plus.' '.X : ''),
+      M.$utf8_encoding,
+      X.($symbol x $repeat_count)
+    ];
 
     # Multi-character composite symbol: print all of its characters in order
     if (length($symbol) > 1) {
-      printfd($outfd, $B.'  [ '.$G);
-      foreach my $cc (split('', $symbol)) { printfd($outfd, sprintf('%04x', ord($cc)).' '); } #printf($outfd '%04x ', ord($c)); }
-      printfd($outfd, $B.']'.$X);
+      push @$row, K_3_4.double_left_angle_bracket.' '.G.join(' ', map { sprintf('%04x', ord($_)) } 
+                                      split('', $symbol)).K_3_4.' '.double_right_angle_bracket.X;
     }
-    printfd($outfd, $X.NL);
+
+    push @table, $row;
   }
 
-  printfd($outfd, NL);
+  $out .= format_table(@table, row_prefix => '  ', colseps => '  ');
+  return $out;
 }
 
 sub show_all_printable_symbols_using_format(;$$) {
   my @sym_list = expand_sym_list($_[0]);
   my $format = $_[1] // '<invalid format>';
+
+  my $out = '';
 
   foreach my $info (@sym_list) {
     my ($name, $symbol, $found_by) = @$info;
@@ -170,10 +185,11 @@ sub show_all_printable_symbols_using_format(;$$) {
        'o' => sprintf('%o', $ord),
        'b' => sprintf('%b', $ord));
   
-    my $out = subst_percent_prefixed_single_chars_using_hash_of_mappings
+     $out .= subst_percent_prefixed_single_chars_using_hash_of_mappings
       ($format, \%subst_hash);
-    printfd($outfd, $out);
   }
+
+  return $out;
 }
 
 sub show_unicode_block($;$) {
@@ -185,19 +201,19 @@ sub show_unicode_block($;$) {
 
   for (my $i = $start; $i < $start + $count; $i++) {
     if (($i % 256) == 0) {
-     $out .= NL;
+     $out .= CLEAR_LINE.NL;
     }
     if (($i % 16) == 0) {
-      $out .= sprintf('  '.$K.'0x'.$Y.'%04x'.$K.':'.$X, $i);
+      $out .= CLEAR_LINE.sprintf('  '.$K.'0x'.$Y.'%04x'.$K.':'.$X, $i);
     }
     $out .= TAB.chr($i);
 
     if (($i % 16) == 15) {
-      $out .= NL;
+      $out .= NL.CLEAR_REST_OF_LINE;
     }
   }
+
   $out .= NL;
-  printfd($outfd, $out);
   return $out;
 }
 
@@ -206,47 +222,42 @@ my @char_code_list;
 my %command_line_options= (
   'format' => [ \$print_format, OPTION_VALUE_REQUIRED, [ 'f' ] ],
   'start' => [ \$first_unicode, OPTION_VALUE_REQUIRED, [ 's' ] ],
-  'count' => [ \$char_count, OPTION_VALUE_REQUIRED | OPTION_TYPE_INTEGER, 'n' ],
-  'rep' => [ \$repeat_count, OPTION_VALUE_REQUIRED | OPTION_TYPE_INTEGER, 'r' ],
+  'end'   => [ \$last_unicode, OPTION_VALUE_REQUIRED, [ 'e' ] ],
+  'count' => [ \$char_count, OPTION_VALUE_REQUIRED, 'n' ],
+  'rep' => [ \$repeat_count, OPTION_VALUE_REQUIRED, 'r' ],
   'scroll' => [ \$no_scrollable, OPTION_ASSIGN_BOOL, [ qw(page scroll less more) ], 1, 0 ],
-  'quiet' => [ \$quiet ],
+  'all' => [ \$show_all_wildcard_matches, 0, [ 'a' ] ],
+  'exact' => [ \$show_all_wildcard_matches, 0, [ 'x' ], 0, 1 ],
+  'utf8' => [ \$show_utf8, 0, [ 'u' ] ],
+  'quiet' => [ \$quiet, 0, [ 'q' ] ],
 );
 
-foreach (@ARGV) {
-  if (/^-format=(.+)$/) {
-    $print_format = $1;
-  } elsif (/^ (\w+) [\-\:] (\w+) $/oamsx) {
-    $first_unicode = oct($1);
-    $last_unicode = oct($2);
-  } elsif (/^-start=(.+)$/oamsx) {
-    $first_unicode = oct($1);
-  } elsif (/^-count=(.+)$/oamsx) {
-    $char_count = oct($1);
-  } elsif ((defined $first_unicode) && /^-end=(.+)$/oamsx) {
-    $last_unicode = oct($1);
-  } elsif (/^-rep (?:eat s?)? (?: -count)? = (\d+)/oamsx) {
-    $repeat_count = oct($1);
-  } elsif (/^(?: [^\=]+ =)? \w+$/oamsx) {
-    push @char_code_list,$_;
-  } elsif (/^-no-(?:page|scroll|less|more)/oamsx) {
-    $no_scrollable = 1;
-  } elsif (/^-a/) {
-    $show_all_wildcard_matches = 1;
-  } elsif (/^-utf8/) {
-    $show_utf8 = 1;
-  } elsif (/^-q(?:uiet)?/oamsx) {
-    $quiet = 1;
-    $no_scrollable = 1;
+my @command_line_options_help = (
+  'format' => 'Specify formatting template string with %(l,n,c,s,d,x,o,b) escapes',
+  'start' => 'UTF-16 code of first character in range to display',
+  'end' => 'UTF-16 code of last character in range to display',
+  'count' => 'Number of character codes to display (if only -start is specified)',
+  'rep' => 'Number of times to repeat each character glyph',
+  'scroll' => 'Allow scrolling through output reports longer than one screen (using \'less\')',
+  'all' => 'Show all characters whose names contain any of the specified substrings',
+  'exact' => 'Only show characters whose names exactly match the names specified',
+  'utf8' => 'Show or hide the equivalent UTF-8 bytes for each character',
+  'quiet' => 'Do not display banners, table headings or any text but character list',
+);
+
+my ($args, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
+
+$first_unicode = parse_integer($first_unicode) if defined($first_unicode);
+$last_unicode = parse_integer($last_unicode) if defined($last_unicode);
+
+foreach my $arg (@$args) {
+  if ($arg =~ /($integer_nocap_re)-(?: ($integer_nocap_re))?/oax) {
+    $first_unicode = parse_integer($1);
+    $last_unicode = (defined $2) ? parse_integer($2) : ($first_unicode + 255);
+    $char_count = ($last_unicode - $first_unicode) + 1;
   } else {
-    die('Invalid option "'.$_.'"');
+    push @char_code_list, $arg;
   }
-}
-
-$outfd = ($no_scrollable) ? STDOUT : (open_scrollable_stream() // STDOUT);
-
-if (!$quiet) {
-  printfd($outfd, print_banner('show-printable-symbols', 'Show all Unicode console characters in MTY::Display::PrintableCharacters'.NL.
-                            'or arbitrary Unicode subsets and ranges using 16-bit Unicode code point IDs', $B));
 }
 
 if (defined $last_unicode) { 
@@ -261,10 +272,29 @@ if ($char_count < 0) { die('Character index specified by "-end '.
 my @all_symbol_names = sort keys %symbols;
 my $list = (scalar @char_code_list) ? \@char_code_list : \@all_symbol_names;
 
-if (defined($first_unicode)) { 
-  set_tab_stops('8', '+4');
-  show_unicode_block($first_unicode, $char_count);
-} else {
-  show_all_printable_symbols($list, $print_format);
+my $out = '';
+
+if (!$quiet) {
+  $out .= print_banner('show-printable-symbols', 'Show all Unicode console characters in MTY::Display::PrintableCharacters'.NL.
+                       'or arbitrary Unicode subsets and ranges using 16-bit Unicode code point IDs', $B);
 }
+
+if (defined($first_unicode)) { 
+  $out .= show_unicode_block($first_unicode, $char_count);
+} else {
+  $out .= show_all_printable_symbols($list, $print_format);
+}
+
+my $lines = scalar(split(/\n/oamsx, $out));
+my $console_lines = get_terminal_height_in_lines() - 2;
+
+$outfd = ($no_scrollable || ($lines < $console_lines)) ? STDOUT : (open_scrollable_stream() // STDOUT);
+
+#
+# Make sure the console's tab stops are set to 
+# column 8 and then every 4 characters thereafter: 
+#
+set_tab_stops('8', '+4');
+
+printfd($outfd, $out);
 

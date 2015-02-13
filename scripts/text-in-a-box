@@ -4,7 +4,7 @@
 # Text in a Box: present multi-line text strings within colorful boxes 
 # made from ANSI line drawing characters
 #
-# Copyright 2004-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2004-2015 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use integer; use warnings;
@@ -233,7 +233,7 @@ sub show_help {
 
 my ($lines, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, \&show_help);
 
-if (!scalar @$lines) {
+if (!@$lines) {
   show_help();
   exit 255;
 }
@@ -252,7 +252,7 @@ if (!exists $box_style_aliases{$divstyle}) {
 
 $boxcolor //= ($invisible_box ? $X : $B);
 $out = '';
-if ($clear_screen_first) { $out .= $CLEAR_SCREEN; }
+if ($clear_screen_first) { $out .= CLEAR_SCREEN; }
 
 if ($banner_mode) {
   my $title = $lines->[0] // '';

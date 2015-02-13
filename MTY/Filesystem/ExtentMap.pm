@@ -5,12 +5,12 @@
 #
 # Linux I/O Device Controls (ioctls)
 #
-# Copyright 2003 - 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2003 - 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::Filesystem::ExtentMap;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 preserve:; our @EXPORT = 
   qw(get_file_extents get_file_handle_extents print_extents summarize_extents
@@ -131,8 +131,8 @@ package FIEMAPExtentStruct {
   sub format_as_string_list($) {
     my ($this) = @_;
 
-    return ('offset', '0x'.format_hex($this->{fe_logical}),
-            'devblock', '0x'.format_hex($this->{fe_physical}),
+    return ('offset', '0x'.hexstring($this->{fe_logical}),
+            'devblock', '0x'.hexstring($this->{fe_physical}),
             'for', $this->{fe_length}.' bytes',
             'flags', format_extent_flags($this->{fe_flags}));
   }

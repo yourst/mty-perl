@@ -8,7 +8,7 @@
 # print a graphical tree by filenames (*.pm), Module::Names, or the nested
 # namespace hierarchy of modules.
 #
-# Copyright 2003-2014 Matt T Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2003-2015 Matt T Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use MTY::Common::Common;
@@ -16,7 +16,6 @@ use MTY::Common::Hashes;
 use MTY::Common::CommandLine;
 use MTY::Filesystem::Files;
 use MTY::Filesystem::FileStats;
-use MTY::Filesystem::EnhancedFileStats;
 use MTY::Common::Strings;
 use MTY::Filesystem::SearchableDirList;
 use MTY::Display::ANSIColorREs;
@@ -61,7 +60,7 @@ my $update_user_module_package_to_filename_cache = 0;
 my $check_package_vs_filename_consistency = 0;
 my $show_perl_config = 0;
 
-my $read_module_names_from_stdin = (! -t 0);
+my $read_module_names_from_stdin = (! stdin_is_terminal());
 my $show_missing_modules_too = 0;
 my $show_only_missing_modules = 0;
 my $show_warnings = 0;
@@ -107,7 +106,7 @@ my %command_line_options = (
   'package-tree' => [ \$show_tree, 0, [qw(module-tree modtree)], TREE_TRUNK_MODULE_PACKAGES ],
   'namespace-tree' => [ \$show_tree, 0, [qw(tree nested-package-tree nstree ns)], TREE_TRUNK_NAMESPACES ],
   'table' => [ \$table_format, 0, 't' ],
-  'cache' => [ \@update_module_package_to_filename_caches, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ ] ],
+  'cache' => [ \@update_module_package_to_filename_caches, OPTION_LIST, [ ] ],
   'syscache' => [ \$update_system_module_package_to_filename_cache, 0, [ 'sc' ] ],
   'usercache' => [ \$update_user_module_package_to_filename_cache, 0, [ 'uc' ] ],
   'check' => [ \$check_package_vs_filename_consistency, 0, [ 'check-package-names-vs-filenames' ] ],
@@ -129,7 +128,7 @@ my %command_line_options = (
   #
   'all' => [ \$query_all_modules, 0, [qw(a query)] ],
   'perlver' => [ \$perl_version, OPTION_VALUE_REQUIRED, [qw(pver pv)] ],
-  'path' => [ \@search_path_list, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [qw(I P)] ],
+  'path' => [ \@search_path_list, OPTION_LIST, [qw(I P)] ],
   'sysonly' => [ \$only_include_system_dirs, 0, [qw(sys so os)] ],
   'useronly' => [ \$only_include_user_dirs, 0, [qw(user uo ou)] ],
   'coreonly' => [ \$only_include_core_modules, 0, [qw(co oc core only-core bo ob builtin only-builtin)] ],
@@ -165,13 +164,13 @@ my @command_line_options_help = (
   'showpath' => 'Print the effective Perl module search path', 
   'libdirs' => 'Print the system wide Perl library directories (usually under /usr/lib/perl5/*)', 
   'config' => 'Print the current Perl version\'s configuration variables in %Config',
-  [ OPTION_HELP_LITERAL ] => '  (no options implies simply finding the target and printing the specified fields)',
+  [ OPTION_HELP_WRAPPED ] => '(no options implies simply finding the target and printing the specified fields)',
 
   [ OPTION_HELP_CATEGORY ] => 'Details to print for matching packages',
   'filename' => 'Print the absolute path and filename', 
   'modname' => 'Print the module package name (obtained from the package declaration in the .pm file)',
-  'version' => 'Print the module package version', 
-  'format' => 'Print the fields specified by the format string argument (see source for examples)', 
+  'version' => 'Print the module package version',
+  'format' => 'Print the fields specified by the format string argument (see source for examples)',
 
   [ OPTION_HELP_CATEGORY ] => 'Control which packages to show or skip, and where to find them',
   'all' => 'Query all modules and packages found in any directory in the search path',
@@ -388,7 +387,7 @@ my $perl_syntax_highlighting_re =
        (?: $perl_comment_re (*:COMMENT)) | 
        (?: $perl_keywords_and_built_in_functions_re (*:KEYWORD)) |
        (?: $perl_sigil_and_identifier_re (*:IDENT)) |
-       (?: $perl_string_re (*:STRING)) |
+       (?: $perl_quoted_string_re (*:STRING)) |
        (?: [\`\~\!\@\#\$\%\^\&\-\+\=\|\\\;\:\,\<\.\>\/\?]++ (*:OP)) |
        (?: [\{\}\(\)\[\]]++ (*:STRUCTURAL))
      )}oamsx;
@@ -445,18 +444,24 @@ sub print_perl_module_source($) {
 sub update_module_package_to_filename_cache($) {
   my ($cachedir) = @_;
 
+  # This is more efficient on modern filesystems:
+  my $single_dir_format = 1;
+  
   foreach my $package (sort keys %package_to_filename) {
     my $filenames = $package_to_filename{$package};
     next if (is_array_ref($filenames) && (scalar(@$filenames) != 1));
 
     my $filename = (is_array_ref($filenames)) ? $filenames->[0] : $filenames;
-    $filename = realpath($filename);
+    $filename = resolve_path($filename);
+    my $symlinkname = $cachedir.'/'.$package;
 
-    my $symlinkname = $cachedir.'/'.($package =~ s{::}{/}roaxg).'.pm';
-
-    mkdirs(directory_of($symlinkname));
-    prints("mkdirs(".directory_of($symlinkname).") => symlink($filename, $symlinkname)\n");
-
+    if (!$single_dir_format) {
+      $symlinkname = $cachedir.'/'.($package =~ s{::}{/}roaxg).'.pm';
+      
+      mkdirs(directory_of($symlinkname));
+      prints("mkdirs(".directory_of($symlinkname).") => symlink($filename, $symlinkname)\n");
+    }
+    
     symlink($filename, $symlinkname) 
       || warn("update_module_package_to_filename_cache: Cannot create symlink from $filename to $symlinkname");
   }
@@ -721,9 +726,8 @@ my %tree_type_to_builder_func = (
 # Main program:
 #
 
-if (!scalar @ARGV) {
-  @ARGV = ('-query', '-os', '-tree');
-}
+if (!@ARGV) { @ARGV = ('-query', '-os', '-tree'); }
+
 my ($requested_modnames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
 
 #
@@ -821,6 +825,18 @@ if ($read_module_names_from_stdin) {
 #
 $table_format //= $query_all_modules;
 
+my $package_name_is_regexp_re = qr{\A / ([^/]++) / \Z}oax;
+my $args_contain_regexps = 0;
+
+foreach $arg (@$requested_modnames) {
+  if ($arg =~ $package_name_is_regexp_re) {
+    $args_contain_regexps = 1;
+    my $mod = ($1 =~ s{::}{/}roaxg);
+    $arg = qr{$mod}oaxi;
+print("arg = $arg\n");
+  }
+}
+
 my $files_searched_so_far = 0;
 
 my $pm_or_al_filename_re = qr{\. (?: pm|al) $}oax;
@@ -849,7 +865,7 @@ if ($only_include_core_modules) {
   # only query core perl modules (whether built into the perl binary
   # or in /usr/lib/perl5/5.x.x/*.pm):
   foreach my $modname (@core_modules) {
-    $filename = lookup_or_find_perl_module($modname);
+    my $filename = lookup_or_find_perl_module($modname);
     if (defined $filename) { 
       push @filenames, $filename;
     } else {
@@ -863,14 +879,23 @@ if ($only_include_core_modules) {
   # we'll only fill in later once we scan the .pm files for package decls:
   @filenames = sort keys %filename_to_package;
 
-  if (!$quiet) { printfd(STDERR, CR.$G.' '.checkmark.' '.$Y.'Found '.$C.padstring(scalar @filenames, -6).$Y.' Perl module files'.$X.$ERASE_TO_END_OF_LINE.NL); }
+  if (!$quiet) { printfd(STDERR, CR.$G.' '.checkmark.' '.$Y.'Found '.$C.padstring(scalar @filenames, -6).$Y.' Perl module files'.$X.CLEAR_REST_OF_LINE.NL); }
 } else {
   $quiet = 1;
-  # only query specified module(s):
+  # only query the specified module(s):
+#  if ($args_contain_regexps) {
+    # fill in %filename_to_package hash keys:
+#    File::Find::find({wanted => \&filter_pm_or_al_files}, @search_path_list);
+#  }
+
   foreach my $modname (@$requested_modnames) {
-    $filename = lookup_or_find_perl_module($modname);
-    next if (!defined $filename);
-    push @filenames, $filename;
+#    if (is_regexp_ref($modname)) {
+#      push @filenames, (grep { print("check ".$_." vs ".$modname.": ".(($_ =~ $modname) $_ =~ $modname } (keys %filename_to_package));
+#    } else {
+      $filename = lookup_or_find_perl_module($modname);
+      next if (!defined $filename);
+      push @filenames, $filename;
+#    }
   }
 }
 
@@ -895,7 +920,7 @@ foreach my $filename (@filenames) {
   } else {
     my $code = read_file($filename);
     if (!defined $code) {
-      simple_warning('Could not read Perl module '.format_quoted($filename));
+      warning('Could not read Perl module '.format_quoted($filename));
       next;
     }
     
@@ -917,7 +942,7 @@ foreach my $filename (@filenames) {
 }
 
 if (!$quiet) {
-  printfd(STDERR, CR.$G.' '.checkmark.' '.$Y.'Processed '.$C.padstring($files_read_so_far, -6).$Y.' Perl module files'.$X.$ERASE_TO_END_OF_LINE.NL);
+  printfd(STDERR, CR.$G.' '.checkmark.' '.$Y.'Processed '.$C.padstring($files_read_so_far, -6).$Y.' Perl module files'.$X.CLEAR_REST_OF_LINE.NL);
   printfd(STDERR, $K.' '.dot.' '.$C.padstring(scalar keys %filename_to_package, -6).$X.' files'.NL);
   printfd(STDERR, $K.' '.dot.' '.$C.padstring(scalar keys %package_to_filename, -6).$X.' packages'.NL);
   printfd(STDERR, $K.' '.dot.' '.$C.padstring(scalar keys %package_to_version, -6).$X.' versioned modules'.NL);
@@ -934,7 +959,7 @@ if (defined $show_tree) {
 } elsif ($show_include_path) {
   prints(join(NL, @search_path_list));
 } elsif ($show_system_lib_dirs) {
-  print_table(STDOUT, invert_hash(%search_path_to_short_name), ' => ', '');
+  print_table(STDOUT, invert_hash(%search_path_to_short_name), colseps => ' => ', padding => [ K_1_3.elipsis_three_dots ]);
 } elsif ($show_perl_config) {
   my @table = map {
     my $v = $perl_config{$_};
@@ -945,7 +970,7 @@ if (defined $show_tree) {
     [ Y.$_, $v ];
   } sort keys %perl_config;
   prints(print_folder_tab(C.'Perl configuration ('.G.'\%Config'.C.')'));
-  prints(format_table(@table, row_prefix => '  '));
+  print_table(STDOUT, @table, row_prefix => '  ', padding => [ K_1_3.elipsis_three_dots ]);
 } elsif ((scalar @update_module_package_to_filename_caches) > 0) {
   foreach my $cachedir (@update_module_package_to_filename_caches) {
     update_module_package_to_filename_cache($cachedir);

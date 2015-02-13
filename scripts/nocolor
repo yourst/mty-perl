@@ -14,7 +14,7 @@
 # by '-check=<fd>') is capable of colorized output, and will exit with 
 # exit code 0 if it is capable, or 255 otherwise, without printing anything.
 #
-# Copyright 2003-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2003-2015 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use integer; use warnings;
@@ -133,6 +133,8 @@ if (defined $program_to_exec) {
   $fd = STDIN;
 }
 
+use constant code_bg_color => bg_color_rgb(96, 0, 48);
+
 sub decode_ansi_color_code($) {
   my ($orig) = @_;
 
@@ -143,7 +145,7 @@ sub decode_ansi_color_code($) {
     return $c;
   } else {
     my $c = ($orig =~ s{[\[\e\x9B\007]}{}roaxg =~ s{m$}{}roaxg);
-    return R.left_angle_quote.Y.$c.R.right_angle_quote.X;
+    return code_bg_color.R.double_left_angle_bracket.Y.$c.R.double_right_angle_bracket.X;
   }
 
   # return R.U.$c.X;

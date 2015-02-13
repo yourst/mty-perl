@@ -1,7 +1,7 @@
 #!/usr/bin/perl -w
 # -*- cperl -*-
 #
-# Copyright 2003-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2003-2015 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use integer; use warnings;

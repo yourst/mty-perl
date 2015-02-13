@@ -5,7 +5,7 @@
 # Scan 802.11 wireless networks to find all visible SSIDs, NWIDs, APs, cells,
 # and corresponding configuration, encryption, bandwidth and related details.
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 use integer; use warnings;

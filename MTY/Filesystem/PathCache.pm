@@ -7,12 +7,12 @@
 # paths (without symlinks, '.' or '..' references), and the results
 # of path existence checks.
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::Filesystem::PathCache;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 preserve:; our @EXPORT = 
   qw(resolve_path resolve_directories_in_path resolve_and_open_path
@@ -130,24 +130,22 @@ sub path_only_contains_filename($) {
   return ($_[0] =~ /$filename_without_leading_directories_re/oamsx) ? 1 : 0;
 }
 
+#
+# Normalize the specified path by removing redundant slashes
+# throughout the path, then ensuring the path is terminated by a
+# single trailing slash. (This function should therefore only
+# be passed paths to directories; it does NOT check the actual
+# filesystem to confirm the path is a directory).
+#
 our $trailing_slash_re = qr{/++$}oax;
 
 sub normalize_trailing_slash($;$) {
-  my ($dirlist, $suffix) = @_;
-
+  my ($path, $suffix) = @_;
   $suffix //= '/';
-
-  if (is_array_ref($dirlist)) {
-    my @out = map { ($_ =~ s{$trailing_slash_re}{}roax).$suffix; } @$dirlist;
-    return (wantarray ? @out : \@out);
-  } else {
-    return ($dirlist =~ s{$trailing_slash_re}{}roax).$suffix;
-  }
+  return (($path =~ tr{/}{/}rs) =~ s{$trailing_slash_re}{}roax).$suffix;
 }
 
-sub strip_trailing_slash {
-  return normalize_trailing_slash($_[0], '');
-}
+sub strip_trailing_slash { return normalize_trailing_slash($_[0], ''); }
 
 my $proc_pid_fd_or_deleted_symlink_target_re = 
   qr{(?>

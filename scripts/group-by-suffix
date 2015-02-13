@@ -10,7 +10,7 @@
 #
 # or displayed as a tree with one node per suffix and one leaf per prefix.
 #
-# Copyright 2003-2014 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2003-2015 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use integer; use warnings;
@@ -42,7 +42,7 @@ my $split_only = 0;
 my $print_tree = 0;
 my $print_tree_suffixes = 1;
 my $no_color = 0;
-my $read_from_stdin = (! -t 0);
+my $read_from_stdin = (! stdin_is_terminal());
 
 my %command_line_options = (
   'prefixes' => [ \$group_by_prefixes, 0, ['p'] ],

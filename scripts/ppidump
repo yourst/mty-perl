@@ -4,7 +4,7 @@
 # ppidump:
 # Use PPI to dump the abstract syntax tree (AST) of Perl source code
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 use integer;

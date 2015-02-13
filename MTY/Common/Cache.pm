@@ -8,15 +8,15 @@
 # the corresponding value and then stores this in the cache. Also
 # provides methods for flushing the cache or specific keys.
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::Common::Cache;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 use MTY::Common::Common;
-use MTY::Common::Strings qw(NL);
+use MTY::Common::Strings;
 use MTY::Common::Hashes;
 
 preserve:; our @EXPORT = qw(query_hash);
@@ -37,31 +37,21 @@ preserve:; our @EXPORT = qw(query_hash);
 
 use constant DEBUG_QUERY_AND_UPDATE_CACHE => 0;
 
-noexport: use constant {
-  hash        => 0,
-  generator   => 1,
-  label       => 2,
-  capacity    => 3,
-  parent_ref  => 4,
-  last_key    => 5,
-  last_value  => 6,
-  hits        => 7,
-  misses      => 8,
-  flushes     => 9,
-  FIELD_COUNT => 10,
-};
+noexport: use constant enum 
+  qw(hash generator label capacity parent_ref 
+     bypass hits misses flushes FIELD_COUNT);
 
-noexport:; sub new($;&$$) {
+sub new($;&$$) {
   my ($class, $generator, $label, $capacity) = @_;
   $capacity //= (1 << 31); # i.e ~2 billion entries
 
   my $hash = { };
-  my $this = [ $hash, $generator, $label, $capacity, undef, undef, undef, 0, 0, 0 ];
+  my $this = [ $hash, $generator, $label, $capacity, undef, undef, 0, 0, 0 ];
 
   return bless $this, $class;
 }
 
-noexport:; sub parent($;$) {
+sub parent($;$) {
   my ($this, $new_parent) = @_;
 
   return $this->[parent_ref] if (!defined $new_parent);
@@ -70,21 +60,47 @@ noexport:; sub parent($;$) {
   return $new_parent;
 }
 
-noexport:; sub set_generator(+&) {
+sub set_generator(+&) {
   my ($this, $generator) = @_;
   $this->[generator] = $generator;
   return $generator;
 }
 
-noexport:; sub get_stats(+) {
+sub get_stats(+) {
   my ($this) = @_;
   my $hash = $this->[hash];
   return @{$_[0]}[hits, misses, flushes, scalar keys %$hash];
 }
 
-noexport:; sub get_using(+$;$@) {
+method:; sub disable_for_keys(++) {
+  my ($this, $bypass) = @_;
+  $bypass //= 1;
+
+  $this->{bypass} = $bypass;
+}
+
+sub disable(+) {
+  my ($this) = @_;
+  $this->{bypass} = 1;
+}
+
+sub enable(+) {
+  my ($this) = @_;
+  $this->{bypass} = undef;
+}
+
+sub get_using(+$;$@) {
   my ($this, $key, $generator, @args) = @_;
   my $cache = $this->[hash];
+  my $bypass = $this->[bypass];
+
+  my $genobj = $this->[parent_ref] // $this;
+
+  if (defined $bypass) {
+    if ((is_hash_ref $bypass) ? (exists $bypass->{$key}) : $bypass) {
+      return $generator->($genobj, $key, @args);
+    }
+  }
 
   if (exists $cache->{$key}) {
     $this->[hits]++;
@@ -119,19 +135,18 @@ noexport:; sub get_using(+$;$@) {
   # not be found (e.g. when doing lookups on a long list of paths, many
   # of which may not even exist).
   #
-  my $genobj = $this->[parent_ref] // $this;
   my $v = $generator->($genobj, $key, @args);
   $cache->{$key} = $v;
 
   return (wantarray ? ($v, 0, \($cache->{$key})) : $v);
 }
 
-noexport:; sub get(+$;@) { 
+sub get(+$;@) { 
   my ($this, $key, @args) = @_;
   return $this->get_using($key, $this->[generator], @args);
 }
 
-noexport:; sub probe(+$;@) { 
+sub probe(+$;@) { 
   my ($this, $key) = @_;
   my $h = $this->[hash];
   if ((!defined $key) || (!exists $h->{$key})) { return (wantarray ? (undef, 0) : undef); }
@@ -154,7 +169,7 @@ noexport:; sub probe(+$;@) {
 # or returns 0 if the key was not previously cached.
 #
 
-noexport:; sub put(+$;$) {
+sub put(+$;$) {
   my ($this, $key, $value) = @_;
   my $h = $this->[hash];
   my $existed = (exists $h->{$key});
@@ -162,7 +177,7 @@ noexport:; sub put(+$;$) {
   return $existed;
 }
 
-noexport:; sub invalidate(+;$) {
+sub invalidate(+;$) {
   my ($this, $key) = @_;
   my $cache = $this->[hash];
 
@@ -174,7 +189,7 @@ noexport:; sub invalidate(+;$) {
   return $existed;
 }
 
-noexport:; sub trim(+;$) {
+sub trim(+;$) {
   my ($this, $new_capacity) = @_;
   my $cache = $this->[hash];
 
@@ -183,13 +198,13 @@ noexport:; sub trim(+;$) {
   return $delta if ($current_size <= $new_capacity);
 
   my @keys_to_evict = (keys %$cache)[$delta];
-  foreach $key (@keys_to_evict) { delete $cache->{$key}; }
+  foreach my $key (@keys_to_evict) { delete $cache->{$key}; }
   $this->[flushes] += $delta;
   $this->[capacity] = $new_capacity;
   return $delta;
 }
 
-noexport:; sub flush(+) {
+sub flush(+) {
   my ($this) = @_;
   my $cache = $this->[hash];
 
@@ -200,7 +215,7 @@ noexport:; sub flush(+) {
   return $n;
 }
 
-noexport:; sub get_hash(+) {
+sub get_hash(+) {
   my ($this) = @_;
   return $this->[hash];
 }

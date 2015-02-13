@@ -6,6 +6,7 @@
 # Copyright 2008 - 2014 Matt T. Yourst <yourst@yourst.com>
 #
 
+# use re qw(debug);
 use integer; use warnings;
 
 use MTY::System::POSIX;
@@ -39,7 +40,7 @@ use MTY::RegExp::CxxREs;
 use MTY::RegExp::PerlSyntax;
 
 #use File::Find;
-
+binmode STDIN, ':raw';
 $DEBUG = 0;
 
 my @regexps = ( );
@@ -73,8 +74,11 @@ $is_list_regexps = 0;
 $list_regexps_as_trees = 1;
 $list_formatted_regexps = 1;
 $is_optimize_regexp = 0;
+$is_condense_regexp = 0;
+$is_dump_regexp = 0;
+my $only_show_modified_lines = 0;
 my @regexps_to_list;
-$backup_before_subst = 1;
+$backup_before_subst = 0;
 $backup_dir = './subst.backups';
 $overwrite_with_subst = 1;
 $orig_format = '';
@@ -244,6 +248,10 @@ foreach $arg (@ARGV) {
     $is_optimize_regexp = 1;
   } elsif ($arg =~ /^-explain/) {
     $is_explain_regexp = 1;
+  } elsif ($arg =~ /^-condense/) {
+    $is_condense_regexp = 1;
+  } elsif ($arg =~ /^-dump/) {
+    $is_dump_regexp = 1;
   } elsif ($arg =~ /^-l(ines)?/) {
     $is_full_lines = 1;
   } elsif (($arg eq '-S') || ($arg eq '-/') || ($arg eq '-split')) {
@@ -330,13 +338,13 @@ if (!($is_help || $is_list_regexps)) {
 
 $invalid_args |= $is_help;
 
-my $is_output_fd_color_capable = (($is_help || $is_list_regexps || $is_explain_regexp || $invalid_args))
+my $is_output_fd_color_capable = (($is_help || $is_list_regexps || $is_explain_regexp || $is_condense_regexp || $is_dump_regexp || $invalid_args))
   ? is_stderr_color_capable() : is_stdout_color_capable();
 
 $is_colorize //= $is_output_fd_color_capable;
 
 my $requested_action_not_compatible_with_color =
-  ($is_subst && $is_filelist && (!$is_stdio)) || $is_eval || $is_split;
+  ($is_subst && $is_filelist && (!$is_stdio)) || $is_eval || $is_split || $is_dump_regexp || $is_condense_regexp;
 
 if ($requested_action_not_compatible_with_color) { $is_colorize = 0; }
 
@@ -361,9 +369,8 @@ sub show_predef_regexps {
   my $regexp_name_list = (scalar @regexps_to_list) 
 	? \@regexps_to_list : \@compiled_regexp_names;
 
-  if (!(scalar @regexps_to_list)) {
-    short_list_compiled_regexps();
-    list_compiled_regexps();
+  if (!@regexps_to_list) {
+    # list_compiled_regexps();
   }
   printfd(STDOUT, NL);
   show_compiled_regexps(\%compiled_regexps, $regexp_name_list, $list_formatted_regexps);
@@ -403,12 +410,10 @@ if ($invalid_args) {
   my $S = "$C$U";
   my $EH = "$Y$U";
 
-  my $help;
-
   printfd($helpfd, print_banner($G.'perlre', 
                              $Y.'Perl regular expression matching, substitution and more', $B));
 
-  $help = q{
+  my $help = q{
 !Syntax:
   perlre <-options ...> 'regexp' 'format(optional)' < input-from-stdin
   perlre <-options ...> 'regexp' 'format(optional)' filename(s) to search
@@ -416,8 +421,11 @@ if ($invalid_args) {
 
 !Output format options:
   If format omitted:  Print captured variables as a simple list of "\$1, \$2, \$3, ..."
-  -e    Evaluate <format> as a Perl expression using eval()
   -s    Print every line with <format> substituted in place of any matches with <regexp>
+        `IMPORTANT:` Files named on the command line `will be permanently overwritten`
+        with the substituted output! If you only want to print the output to stdout, 
+        make sure you use a pipe instead, i.e. "perlre -s ... < filename".
+  -e    Evaluate <format> as a Perl expression using eval()
   -l    Print entire line instead of only showing a list of capture group contents
   -1    Only print first matching line
   -S or -/  Split into a key, a separator (the regexp) and a value, then format (default: key=value)
@@ -459,7 +467,9 @@ if ($invalid_args) {
   -dre           Debug Perl's internal regexp state machine representation of regexp and each step of its execution
   -list-regexps  Show the actual contents of predefined regexps
   -list-regexp=X Show the actual contents of the specified predefined regexp named X (e.g. "-list-regexp=example_regexp_re")
-  -explain-re    Expand, colorize, beautify and explain the regexp given on the command line
+  -explain       Expand, colorize, beautify and explain the regexp given on the command line
+  -dump          Dump the the source code of the specified regexp exactly as is
+  -condense      Condense the source code of the specified regexp by optimizing it and removing comments, newlines and whitespace
 
 !Captured variables in format:
   The specified format can print any capture groups in the regexp, which are indicated using
@@ -467,28 +477,43 @@ if ($invalid_args) {
   initial question mark, are non-capturing). 
   
   The format either specifies capture groups by number, i.e. $1 for the first group, $2 for
-  the next group (independent of possible nesting), and so forth, or by name, using $+{'name'}
-  to refer to the regexp group labeled using (?'name' ...). See the perlre man page for details.
+  the next group, and so forth (independent of possible nesting, unless "(?|" groups are used 
+  to reset the capture group number counter), and so forth, or by name, using $+{'name'} to
+  refer to the regexp group labeled using (?'name' ...). See the perlre man page for details.
 
   perlre also supports several special identifiers in the format:
 
-       (if using ':: file1 fileN...'):       (if using '-- string1 stringN...')
   $* = matching substring
   $@ = filename containing the match (or original string if using '-- string ...')
   $& = filename (without dir) with the match (or original string)
-  $% = file number (first file is 0)         string number (first string is 0)
+  $% = file number (first file is 0) or string number if using '--' (first string is 0)
   $# = number of matches so far
   $_ = entire line containing the match (does not work in multi-line (-m) mode) 
   $. = line number within file or string (if not using -m)
   $- = offset (0+) of start of match in line (if -m, from start of entire file or string)
   $+ = offset (0+) of end of match in line (if -m, from start of entire file or string)
   $? = length of match in characters
+  $= = value of $REGMARK (if set by a "(*mark_name_here)" construct in the regexp)
 
-  When these are used to customize the formatting of filenames, the -no-filenames option may be useful.
+  Note: For security reasons, it is NOT possible to print an arbitrary variable by simply 
+  including "$varname" in the pattern. If you want this capability, use the -e option to
+  specify a Perl code block to run on each match instead of a simple pattern.
+
+  When these are used to customize the formatting of filenames, the -no-filenames option 
+  may be useful (otherwise each filename would be redundantly printed twice).
+
+!Pre-defined Regular Expressions Library
+
+  perlre incorporates a huge library of hundreds of pre-defined regular expressions
+  which may be incorporated into your regexp using "... $predef_regexp_name_re ..."
+  (The "_re" suffix is required and is actually what these regexps are named).
+
+  The -list-regexps option prints a comprehensive listing of all available regexps
+  along with a visual explanation of their structure.
 
 };
 
-  $examples .= q{
+  my $examples = q{
 !Simple example:
   <EX>commandname | perlre "\s+(TARGET)\s+(\w+)\$"</EX>
   (just prints list of specified strings extracted from stdin)
@@ -515,18 +540,30 @@ if ($invalid_args) {
 };
 
   # Convert the simple help formatting codes and rules into ANSI color codes:
-  $help =~ s{\!(\N+)\n}{format_help_tab($1)}oamsxge;
-  $help =~ s{\s\K(\-[\w\-\=]+)(?=[\s\,])}{$Y$1$X}oamsxg;
-  $help =~ s{(\$\S)}{$G$1$X}oamsxg;
-  $help =~ s{perlre}{${G}perlre${X}}oamsxg;
+  my $lsq = left_single_quote;
+  my $rsq = right_single_quote;
+  my $lq = left_quote;
+  my $rq = right_quote;
+
+  $help = $help
+    =~ s{^\!(\N+)\n}{format_help_tab($1)}roamsxge
+    =~ s{\s\K(\-[\w\-\=]+)(?=[\s\,])}{$Y$1$X}roamsxg
+    =~ s{"([^"]*+)"}{$lq$1$rq}roamsxg
+    =~ s{'([^']*+)'}{$lsq$1$rsq}roamsxg
+    =~ s{(\$\S)}{$G$1$X}roamsxg
+    =~ s{\`([^\`]++)\`}{$R$U$1$UX$X}roamsxg
+    =~ s{perlre}{${G}perlre${X}}roamsxg;
 
   printfd($helpfd, $help);
 
-  printfd($helpfd, NL.text_in_a_box($G.'E X A M P L E S', 0, $B, 'double', undef, (' ' x 20), 40));
+  printfd($helpfd, NL.text_in_a_box($G.'EXAMPLES', 0, $B, 'double', undef, (' ' x 20), 40));
 
-  $examples =~ s/\!(\N+)\n/$Y$U$1$X\n/gms;
-  $examples =~ s/\<EX\>(.+?)\<\/EX\>/$G$1$X/gms;
+  $examples = $examples
+    =~ s{\!(\N+)\n}{$Y$U$1$X\n}roamsxg
+    =~ s{\<EX\>(.+?)\<\/EX\>}{$G$1$X}roamsxg;
+
   printfd($helpfd, $examples);
+  printfd($helpfd, NL);
 
   show_command_line_options($helpfd);
 
@@ -566,9 +603,25 @@ if ($is_pattern_regexp) {
   # replace "\q" with single quote (') to make it easier to specify
   # single quotes nested within single quoted command line arguments,
   # since bash and similar shells don't allow escaped quotes (\')
-  # within single quotes (this annoying quirk remains unexplained).
+  # within single quotes.
   #
-  $regexp =~ s{\\ q}{'}oamsxg;
+  # It is possible to work around this using the $'...' syntax,
+  # which allows single quotes to be escaped as \', but this syntax
+  # ironically creates even more problems because $'...' expands
+  # various Perl regexp backslash sequences into control characters
+  # (e.g. \b is consumed by the shell and turned into a backspace,
+  # not a word break as is intended within a regexp). 
+  #
+  # The only viable solution is for bash to adopt user defined 
+  # string delimiters (like Perl's q?...? or C++11's R"(?...?),
+  # but so far the bash developers have neither adopted this
+  # solution nor provided any other workaround for this very
+  # annoying and unexplained deficiency in the shell's syntax.
+  #
+  # Therefore, if you need to include single quotes inside a
+  # regexp passed on the command line, use "\q" instead of "'".
+  #
+  $regexp =~ s{(?<! \\) \\ q}{'}oamsxg;
 } else {
   $regexp = quotemeta($regexp);
   $capture_group_count = 0;
@@ -606,7 +659,13 @@ if (defined($die_error_message)) {
 
 if ($is_explain_regexp) {
   printfd(STDOUT, NL);
-  show_compiled_regexp('(regexp)', $regexp);
+  show_compiled_regexp('(specified regexp)', $regexp);
+  exit 0;
+} elsif ($is_dump_regexp) {
+  printfd(STDOUT, $regexp);
+  exit 0;
+} elsif ($is_condense_regexp) {
+  printfd(STDOUT, condense_regexp($regexp));
   exit 0;
 }
 
@@ -681,11 +740,12 @@ if ($is_split) {
   '+' => '$endpos',     # offset of end of match
   '?' => '$matchlen',   # offset of end of match
   '~' => '$origmatch',  # pre-substitution matching string (only used internally by '-subst -dry-run')
+  '=' => '$REGMARK',    # REGMARK special variable if set by (*regmark_value_here) in the regexp
 );
 
 my $special_formats_re = 
   qr{(?<! \\) \$ (?:
-       ([\@\&\%\#\.\-\+\?\*\_\~]) | 
+       ([\@\&\%\#\.\-\+\?\*\_\~\=]) | 
        (?: \' (\w+) \')
      )}oamsx;
 
@@ -701,10 +761,13 @@ sub replace_special_format {
   }
 }
 
+my $use_dark_unreplaced_text_color = 0;
+
 if ($is_colorize && ($is_full_lines || ($capture_group_count > 0)) && is_stdout_color_capable()) {
   # Obviously we don't want to colorize the actual text we're substituting 
   # into files unless we're also printing that text to the console:
   if ($is_subst) {
+    $use_dark_unreplaced_text_color = 1;
     $format = $original_before_replacement_color.'$~'.$replaced_match_color.$format.X;
   } else {
     $format =~ s{[^\$\\] \K (\$ \{? \w+ \}?)}{${C}${1}${Y}}oamsxg;
@@ -813,6 +876,19 @@ if (!$is_eval) {
     $format = '"' . "$format" . '"';
   }
 }
+
+#
+# Allow the use of \q in the format in place of a single quote (')
+# because some shells (notably bash) cause all sorts of grief if
+# you want to use single quotes (since escaping them as '...\'...' 
+# will actually output \' (with the backslash) instead of only ',
+# yet "'" in double quotes will also interpolate any $variables,
+# thus requiring every $ to be escaped too. Hence we provide an
+# alternative via \q, both within regexp patterns (see above) 
+# and within output formats (see below):
+# 
+
+$format =~ s{(?<! \\) \\ q}{'}oamsxg;
 
 # This is customized to the longest filename later:
 my $max_filename_length = 40;

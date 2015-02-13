@@ -8,7 +8,7 @@
 # print a graphical tree by filenames (*.pm), Module::Names, or the nested
 # namespace hierarchy of modules.
 #
-# Copyright 2003-2014 Matt T Yourst <yourst@yourst.com>. All rights reserved.
+# Copyright 2003-2015 Matt T Yourst <yourst@yourst.com>. All rights reserved.
 #
 
 use integer; use warnings;
@@ -80,7 +80,7 @@ if (defined $read_dumped_lvm_command_output_from_file) {
 
 my @cmdout = split(/\n+/oax, $lvs_command_output);
 
-printfd(STDERR, carriagereturn.$ERASE_TO_END_OF_LINE); # $G.' '.checkmark.' '.$Y.'Checked all LVM volumes'.$X.NL);
+printfd(STDERR, carriagereturn.CLEAR_REST_OF_LINE); # $G.' '.checkmark.' '.$Y.'Checked all LVM volumes'.$X.NL);
 
 my %vg_to_lvs = ( );
 
@@ -89,7 +89,7 @@ my $lv_name_in_path_re = qr{/dev/([^/]++)/(.++)$}oax;
 my $longest_lv_name_length = 0;
 
 my $lvm_field_equals_quoted_value_re = 
-  qr{\s*+ LVM2_(\w++) = ' ($inside_single_quoted_string_nocap_re) '}oax;
+  qr{\s*+ LVM2_(\w++) = ' ($inside_single_quoted_re) '}oax;
 
 my %uuid_to_lv;
 

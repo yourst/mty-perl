@@ -1,0 +1,69 @@
+#!/usr/bin/perl -w
+
+use MTY::Common::Common;
+use MTY::Common::Strings;
+use MTY::Common::CommandLine;
+use MTY::Filesystem::Files;
+use MTY::Display::Table;
+use MTY::RegExp::Strings;
+use MTY::RegExp::Blocks;
+use MTY::RegExp::FilesAndPaths;
+
+my $show_syscalls = undef;
+my $show_paths = undef;
+my $show_results = undef;
+my $show_existing_or_missing = 0; # default is to show both
+my %syscalls_to_show = ( );
+
+my %command_line_options = (
+  'syscalls' => [ \$show_syscalls, 0, [ qw(s) ] ],
+  'paths' => [ \$show_syscalls, 0, [ qw(p f) ] ],
+  'results' => [ \$show_syscalls, 0, [ qw(r) ] ],
+  'existing' => [ \$show_existing_or_missing, 0, [ qw(e found ok) ], +1 ],
+  'missing' => [ \$show_existing_or_missing, 0, [ qw(m error) ], -1 ],
+  'syscall' => [ \%syscalls_to_show, OPTION_HASH, [ qw(c sc call) ] ],
+);
+
+my ($filenames, $invalid_option_indexes, $command_line_option_values) = 
+  parse_and_check_command_line(%command_line_options, @ARGV);
+
+my $default_show = (any_defined($show_syscalls, $show_paths, $show_results)) ? 0 : 1;
+
+$show_syscalls //= $default_show;
+$show_paths //= $default_show;
+$show_results //= $default_show;
+
+my $show_all_syscalls = (!%syscalls_to_show);
+
+my $strace_line_with_path_error_check_re = 
+  ($show_existing_or_missing == 0) ? qr{\-?\d++ (?> \s++ (\S++))?}oax : # show both
+  ($show_existing_or_missing > 0) ? qr{() \d++}oax : # show existing only
+  qr{\-\d++ \s++ (E[A-Z0-9_]++)}oax; # show missing only
+
+my $strace_line_with_path_re = 
+  qr{^ \s*+ \d++ \s++ [\d\.]++ \s*+ 
+     ((?! read|write|ioctl) \w++) \( 
+     [^"]*+ " ([^\"\)\/]*+ / [^\"\)]*+) " 
+     [^\)]*+ \) 
+     \s*+ = \s*+ $strace_line_with_path_error_check_re
+  }oax;
+
+my $filename = $filenames->[0];
+
+my @lines = (defined $filename) ? read_file_as_lines($filename) : read_file_handle_as_lines(STDIN);
+
+my @table = ( );
+
+foreach my $line (@lines) {
+  my ($syscall, $path, $result) = ($line =~ /$strace_line_with_path_re/oax);
+  next if (!defined $path);
+  next if (!($show_all_syscalls || exists $syscalls_to_show{$syscall}));
+
+  my @row = ( );
+  push @row, $syscall if ($show_syscalls);
+  push @row, ($result // '') if ($show_results);
+  push @row, $path if ($show_paths);
+  push @table, [ @row ];
+}
+
+print_table(STDOUT, @table);

@@ -3,7 +3,7 @@
 #
 # MTY::PerlModDeps::Main
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 # perl-mod-deps is an automatic code generator which automatically manages
 # the imports and exports of Perl modules as well as programs. Collections
@@ -128,7 +128,7 @@
 
 package MTY::PerlModDeps::Main;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 use MTY::Common::Common;
 use MTY::Common::Hashes;
@@ -232,8 +232,8 @@ my %command_line_options = (
   #
   'show-unmodified-modules' => [ \$show_unmodified_modules, 0, 
     [ qw(list-all all a list-unmodified show-unmodified list-unmodified-modules) ] ],
-  'modpath' => [ \@modpath, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ qw(path libpath libs mp p) ] ],
-  'namespaces' => [ \@allowed_module_namespaces, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ qw(namespace ns n) ] ],
+  'modpath' => [ \@modpath, OPTION_LIST, [ qw(path libpath libs mp p) ] ],
+  'namespaces' => [ \@allowed_module_namespaces, OPTION_LIST, [ qw(namespace ns n) ] ],
   'makefile-target-prefix-dir' => [ \$makefile_target_prefix_dir, OPTION_VALUE_REQUIRED, [ qw(target-prefix-dir prefix tpd) ] ],
   'ppi-cache' => [ \$ppi_cache_path, OPTION_VALUE_REQUIRED, [ qw(cache) ] ],
 );
@@ -354,10 +354,10 @@ sub main {
   if (defined $ppi_cache_path) {  
     if (! -d $ppi_cache_path) { 
       mkdir($ppi_cache_path, DEFAULT_DIR_PERMS) || 
-        simple_warning("Cannot create PPI cache directory $ppi_cache_path");
+        warning("Cannot create PPI cache directory $ppi_cache_path");
     }
     $ppi_cache = PPI::Cache->new(path => $ppi_cache_path)
-      || simple_warning("Cannot create PPI cache in $ppi_cache_path");
+      || warning("Cannot create PPI cache in $ppi_cache_path");
     PPI::Document->set_cache($ppi_cache);
   }
   

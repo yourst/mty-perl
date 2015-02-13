@@ -10,5 +10,5 @@ foreach my $ip (@iplist) {
            [${1}{${2},${3}}]oaxg;
 }
 
-prints($out."\n");
+print($out."\n");
 

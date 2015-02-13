@@ -1,0 +1,194 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# hex: hex dumps in color
+#
+# Copyright 2003 - 2015 Matt T. Yourst <yourst@yourst.com>
+#
+
+use integer; use warnings; 
+
+use MTY::System::POSIX;
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Common::Strings;
+use MTY::Common::CommandLine;
+
+use MTY::Filesystem::Files;
+
+use MTY::Display::Colorize;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::PrintableSymbols;
+use MTY::Display::PrintableSymbolTools;
+use MTY::Display::Table;
+use MTY::Display::Tree;
+use MTY::Display::TextInABox;
+
+my $screen_lines = get_terminal_height_in_lines();
+my $screen_cols = get_terminal_width_in_columns();
+
+sub width_with_bytes_per_line($) {
+  my ($n) = @_;
+  return 8 + 2 + 3*$n + 2 + $n;
+}
+
+my $bytes_per_line = 32;
+
+#while (width_with_bytes_per_line($bytes_per_line) < $screen_cols) { $bytes_per_line *= 2; }
+
+my $offset = 0;
+my $length = (1 << 62);
+my $show_line_numbers = undef; # automatically determined (yes for obvious text files)
+my $show_decimal_offsets = 0;
+my $relative_offsets = 0;
+my $show_abbrev_decimal_offsets = 0;
+my $unprintable_replacement_char = undef; # show unicode glyphs for these if possible
+my $only_show_ascii = 1;
+
+my %command_line_options = (
+  'bytes-per-line' => [ \$bytes_per_line, OPTION_VALUE_REQUIRED, [ qw(b bpl) ] ],
+  'offset' => [ \$offset, OPTION_VALUE_REQUIRED, [ qw(@ o) ] ],
+  'length' => [ \$length, OPTION_VALUE_REQUIRED, [ '#', 'n' ] ],
+  'line-numbers' => [ \$show_line_numbers, 0, [ 'l', 'lines' ] ],
+  'decimal-offsets' => [ \$show_decimal_offsets, 0, [ 'D' ] ],
+  'abbrev-decimal-offsets' => [ \$show_abbrev_decimal_offsets, 0, [ 'd' ] ],
+  'relative-offsets' => [ \$relative_offsets, 0, [ 'r', 'relative' ] ],
+  'unprintable-char' => [ \$unprintable_replacement_char, OPTION_VALUE_REQUIRED, [ 'u' ] ],
+  'only-ascii' => [ \$only_show_ascii, 0, [ 'a' ] ],
+);
+
+my @command_line_options_help = (
+  [ OPTION_HELP_BANNER ] => 'Print hex dumps of files, in color and with various formatting',
+  [ OPTION_HELP_SYNTAX ] => undef,
+  [ OPTION_HELP_CATEGORY ] => 'Subset of Input',
+  'offset' => 'Offset from start of input',
+  'length' => 'Total number of bytes to display',
+  [ OPTION_HELP_CATEGORY ] => 'Formatting',
+  'bytes-per-line' => 'Number of bytes to display per line (default is 16 if terminal has <= 80 columns, or 32 otherwise)',
+  'line-numbers' => 'Show line numbers along with offsets (for text files)',
+  'decimal-offsets' => 'Show offsets in decimal instead of hex',
+  'relative-offsets' => 'Show offsets relative to base specified by -offset option',
+  'abbrev-decimal-offsets' => 'Show abbreviated decimal offsets (e.g. "+1234 KB") to right of hex offsets',
+  'unprintable-char' => 'Print specified character in place of any unprintable characters',
+  'only-ascii' => 'Only print ASCII characters (alphanumeric and punctuation); others are unprintable',
+);
+
+my ($filenames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
+
+if (!@$filenames) { $filenames = [ '/dev/stdin' ]; }
+
+use constant {
+  PURPLE => fg_color_rgb(192, 128, 255),
+};
+
+my @remap_ascii_to_printable_unicode = (
+  # 00 - 1f
+#  (map { B.chr($_) } (0x2400 .. 0x2408)), G.under_space, G.return_enter_key_symbol, B.chr(0x240b), B.chr(0x240c), G.small_left_barbed_arrow, B.chr(0x240e), B.chr(0x240f),
+#  (map { B.chr($_) } (0x2410 .. 0x2419)), R.double_struck_z, Y.small_fancy_e, (map { B.chr($_) } (0x241c .. 0x241f)),
+  fg_color_rgb(192, 0, 0).dot_small,# 0x00
+  M.'1',          # 0x01
+  M.'2',          # 0x02
+  M.'3',          # 0x03
+  M.'4',          # 0x04
+  M.'5',          # 0x05
+  M.'6',          # 0x06
+  M.'!',          # 0x07
+  M.'8',          # 0x08
+  G.under_space,  # 0x09 (tab)
+  G.return_enter_key_symbol, # 0x0A (line feed),
+  M.'B', # 0x0B
+  M.'C', # 0x0C
+  G.small_left_barbed_arrow, # 0x0D (carriage return),
+  M.'E', # 0x0E
+  M.'F', # 0x0F
+  B.'0', # 0x10
+  B.'1', # 0x11
+  B.'2', # 0x12
+  B.'3', # 0x13
+  B.'4', # 0x14
+  B.'5', # 0x15
+  B.'6', # 0x16
+  B.'7', # 0x17
+  B.'8', # 0x18
+  B.'9', # 0x19
+  R.chr(0x396), # 0x1A (EOF)
+  Y.euler_e,   # 0x1B (ESC)
+  B.'C', # 0x1C
+  B.'D', # 0x1D
+  B.'E', # 0x1E
+  B.'F', # 0x1F
+
+  # 20 - 7f
+  (map { X.chr($_) } (0x20 .. 0x7e)), 
+  K.up_arrow_open_tri,
+  # 80 - bf: UTF-8 bytes 2, 3, 4
+  ((Y.small_u) x 64),
+  # c0 - df
+  #((Y.chr(0x2777)) x 32), # (0xbd) x 32, # "1/2" (1 of 2 UTF-8 bytes)
+  ((ORANGE.'2') x 32), # (0xbd) x 32, # "1/2" (1 of 2 UTF-8 bytes)
+  # e0 - ef
+  # ((Y.chr(0x2778)) x 16), # (0x2153) x 16, # "1/3" (1 of 3 UTF-8 bytes)
+  ((ORANGE.'3') x 16), # (0x2153) x 16, # "1/3" (1 of 3 UTF-8 bytes)
+  # f0 - f7
+  #((Y.chr(0x2779)) x 8), # (1 of 4 UTF-8 bytes)
+  ((ORANGE.'4') x 8), # (1 of 4 UTF-8 bytes)
+  # f8 - fb
+  # ((Y.chr(0x277a)) x 4), # (1 of 5 UTF-8 bytes)
+  ((ORANGE.'5') x 4), # (1 of 5 UTF-8 bytes)
+  # fc - fd
+  # ((Y.chr(0x277b)) x 2), # (1 of 6 UTF-8 bytes)
+  ((ORANGE.'6') x 2), # (1 of 6 UTF-8 bytes)
+  # fe - ff
+  R.'E', R.'F',
+);
+#se DDP; p @remap_ascii_to_printable_unicode;
+#ie if (scalar @remap_ascii_to_printable_unicode != 256);
+
+my $zero_even_col_color = fg_color_rgb(255, 0, 0);
+my $zero_odd_col_color = scale_rgb_fg($zero_even_col_color, 0.75);
+
+my $control_even_col_color = ORANGE;
+my $control_odd_col_color = scale_rgb_fg($control_even_col_color, 0.75);
+
+my $printable_even_col_color = fg_color_rgb(0, 255, 64);
+my $printable_odd_col_color = scale_rgb_fg($printable_even_col_color, 0.75);
+  
+my $other_even_col_color = SKYBLUE;
+my $other_odd_col_color = scale_rgb_fg($other_even_col_color, 0.75);
+
+my $vert_sep_bar_color = fg_color_rgb(80, 144, 192);
+
+my $light_bgcolor = bg_color_rgb(20, 36,  48);
+my $dark_bgcolor = scale_rgb_bg($light_bgcolor, 0.6);
+
+foreach my $filename (@$filenames) {
+  if ((scalar @$filenames) > 1) { prints(print_folder_tab($filename).NL); }
+
+  my $data = read_file($filename);
+  my $end = min($offset + $length, length($data));
+  my $line = 0;
+  while ($offset < $end) {
+
+    my $chunk = substr($data, $offset, $bytes_per_line);
+    my @chunk = map { ord($_) } split(//, $chunk);
+    if ((scalar @chunk) < $bytes_per_line) { push @chunk, ((undef) x ($bytes_per_line - (scalar @chunk))); } 
+
+    my $bgcolor = ($line++ & 1) ? $light_bgcolor : $dark_bgcolor;
+    my $col = 0;
+    prints($bgcolor, C.sprintf('%8x', $offset), $vert_sep_bar_color.' '.long_narrow_double_vert_bars.' '.G.
+             join(' ', map { 
+               my $odd = ($col & 1);
+               my $c = 
+                 (!defined $_) ? '' :
+                 ($_ == 0x00) ? (($odd) ? $zero_odd_col_color : $zero_even_col_color) :
+                 ($_ < 0x20) ? (($odd) ? $control_odd_col_color : $control_even_col_color) :
+                 (($_ >= 0x20) && ($_ <= 0x7e)) ? (($odd) ? $printable_odd_col_color : $printable_even_col_color) :
+                 (($odd) ? $other_odd_col_color : $other_even_col_color); 
+               $col++;
+               (defined $_) ? $c.sprintf('%02x', $_) : '  ' 
+             } @chunk),
+           ' '.X.K_2_3.' '.long_narrow_vert_bar.' '.X,
+           join('', map { (defined $_) ? $remap_ascii_to_printable_unicode[$_] : ' ' } @chunk), X, NL);
+    $offset += $bytes_per_line;
+  }
+}

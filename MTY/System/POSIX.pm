@@ -3,12 +3,12 @@
 #
 # MTY::System::POSIX
 #
-# Copyright 2002 - 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2002 - 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::System::POSIX;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 require 'syscall.ph';
 
 my @POSIX_symbols;
@@ -111,12 +111,10 @@ BEGIN {
 };
 
 use POSIX (@POSIX_symbols);
-
 use POSIX::2008 (@POSIX_2008_symbols);
-
 use Fcntl (@Fcntl_symbols);
-
 use Errno (@Errno::EXPORT, @Errno::EXPORT_OK);
+use IO::Dirent qw(readdirent);
 
 # Defined by the latest Linux kernels but not yet in the Perl definitions:
 use constant O_PATH => 010000000;
@@ -192,7 +190,8 @@ sub path_is_symlink($;$) {
   # All other error codes mean the specified path didn't exist
   # or at least the caller cannot access it.
   #
-  return ($rc >= 0) ? +1 : ($rc == -(EINVAL)) ? 0 : -1;
+  $rc = ($rc >= 0) ? +1 : ($rc == -(EINVAL)) ? 0 : -1;
+  return (wantarray ? ($rc, $symlink) : $rc);
 }
 
 my $strip_last_path_component_re =
@@ -331,6 +330,24 @@ sub perl_closedir_hook {
   goto &CORE::closedir;
 };
 
+sub inode_and_type_of_dir_entry($) {
+  my ($e) = @_;
+  return (
+    ($e & ((1 << 60) - 1)), 
+    (($e >> 60) & 0xf),
+  );
+}
+ 
+sub sys_readdir_ext($) {
+  my ($fd) = @_;
+  return (map { $_->{name} => (($_->{inode} & ((1 << 60) - 1)) | ($_->{type} << 60)) } readdirent($fd));
+}
+
+sub clock_nanosecs() {
+  my ($sec, $nsec) = clock_gettime(CLOCK_REALTIME);
+  return ($sec * 1000000000) + $nsec;
+}
+
 BEGIN {
   no warnings;
 # *CORE::GLOBAL::close = *perl_close_hook;
@@ -415,8 +432,9 @@ preserve:; our @EXPORT = (
   sys_renameat sys_rewinddir sys_symlinkat sys_unlinkat sys_utimensat
   O_PATH DEFAULT_DIR_PERMS DEFAULT_FILE_PERMS strftime clock_gettime_nsec
   getpid clock_gettime_nsec sys_open_path path_of_open_fd 
-  path_is_symlink get_native_fd is_file_handle 
-  uncached_path_of_open_fd)
+  path_is_symlink get_native_fd is_file_handle sys_readdir_ext
+  inode_and_type_of_dir_entry uncached_path_of_open_fd
+  clock_nanosecs)
 );
 
 1;

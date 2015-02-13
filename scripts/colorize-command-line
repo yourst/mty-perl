@@ -2,7 +2,7 @@
 #
 # Colorize make output, errors and warning messages
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 # Note: gcc now uses Unicode quotes if LANG=en_US.UTF-8, so use the UTF-8 encodings of these,
@@ -16,7 +16,7 @@ $terminal = $ENV{'TERM'} || 'dumb';
 
 # If it's in the list of terminal types not to color, or if
 # we're writing to something that's not a tty, don't do color.
-if (! -t STDERR || ($terminal eq 'dumb')) {
+if (! stderr_is_terminal() || ($terminal eq 'dumb')) {
   while (<STDIN>) { printfd(STDERR, $_); }
   exit 0;
 }

@@ -7,12 +7,12 @@
 # paths (without symlinks, '.' or '..' references), and the results
 # of path existence checks.
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::Filesystem::CurrentDir;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 preserve:; our @EXPORT = qw(sys_getcwd sys_chdir get_current_dir_fd getcwd cwd);
 

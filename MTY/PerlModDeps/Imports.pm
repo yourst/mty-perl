@@ -2,12 +2,12 @@
 #
 # MTY::PerlModDeps::Exports
 #
-# Copyright 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::PerlModDeps::Imports;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 use MTY::Common::Common;
 use MTY::Common::Hashes;
@@ -162,7 +162,7 @@ sub update_auto_imports(+) {
 
   my $replcount = ($m->{code} =~ s/$auto_import_clause_re/$out/oamsx);
   if (!$replcount) {
-    simple_warning('Module '.($m->{module_name} // $m->{filename}).' did not have an #!autoimport marker');
+    warning('Module '.($m->{module_name} // $m->{filename}).' did not have an #!autoimport marker');
   }
 
   return $out;

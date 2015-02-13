@@ -11,17 +11,19 @@
 #
 # This module globally overrides the stat() and realpath() functions.
 #
-# Copyright 1997 - 2014 Matt T. Yourst <yourst@yourst.com>
+# Copyright 1997 - 2015 Matt T. Yourst <yourst@yourst.com>
 #
 
 package MTY::Filesystem::StatsCache;
 
-use integer; use warnings; use Exporter::Lite;
+use integer; use warnings; use Exporter qw(import);
 
 preserve:; our @EXPORT = 
   qw(get_file_stats get_file_stats_of_fd flush_file_stats_cache dump_file_stats_cache
      FILE_TIMESTAMP_MODIFIED_DATA FILE_TIMESTAMP_CHANGED_ATTRS FILE_TIMESTAMP_ACCESSED
-     fixup_nanosec_file_timestamps get_file_timestamps get_mtime_of_path get_mtime_of_fd);
+     fixup_nanosec_file_timestamps get_file_timestamps get_mtime_of_path get_mtime_of_fd
+     get_file_type get_file_type_nofollow is_file_type is_file_type_nofollow is_exact_file_type 
+     is_exact_file_type_nofollow);
 
 use MTY::System::POSIX;
 use MTY::Common::Common;
@@ -82,6 +84,57 @@ sub get_file_timestamps {
   return (wantarray ? @timestamps : \@timestamps);
 }
 
+sub get_file_type($;$) {
+  my ($path, $follow_symlinks) = @_;
+  $follow_symlinks //= 1;
+  my $stats = get_file_stats($path, undef, $follow_symlinks);
+  return ((defined $stats) ? $stats->[STAT_TYPE] : undef);
+}
+
+sub get_file_type_nofollow($) {
+  my ($path) = @_;
+  return get_file_type($path, 0);
+}
+
+sub is_file_type($$;$$) {
+  my ($path_or_fd_or_stats, $req_type, $follow_symlinks, $exact) = @_;
+  $follow_symlinks //= 1;
+  $exact //= 0;
+
+  my $stats = (is_array_ref $path_or_fd_or_stats) ? $path_or_fd_or_stats :
+    (is_string $path_or_fd_or_stats) ? get_file_stats($path_or_fd_or_stats, undef, $follow_symlinks) :
+    get_file_stats_of_fd($path_or_fd_or_stats);
+
+  if (!defined $stats) { return undef; }
+  my $real_type = $stats->[STAT_TYPE];
+  # Correctly handle equivalencies and inclusive subtypes:
+  if ($real_type == $req_type) { return 1; }
+  if ($exact) { return (($req_type == $real_type) ? 1 : 0); }
+
+  my $match = 
+    ($req_type == FILE_TYPE_DIR) ? (($real_type == FILE_TYPE_DIR) || ($real_type >= FILE_TYPE_MOUNT_POINT)) :
+    ($req_type == FILE_TYPE_MOUNT_POINT) ? (($real_type >= FILE_TYPE_MOUNT_POINT) && ($real_type < FILE_TYPE_SUBVOLUME)) :
+    ($req_type == FILE_TYPE_SUBVOLUME) ? (($real_type == FILE_TYPE_SUBVOLUME) || ($real_type == FILE_TYPE_SNAPSHOT)) :
+    ($req_type == $real_type);
+
+  return ($match ? 1 : 0);
+}
+
+sub is_file_type_nofollow($$) {
+  my ($path, $req_type) = @_;
+  return is_file_type($path, $req_type, 0);
+}
+
+sub is_exact_file_type($$;$) {
+  my ($path, $req_type, $follow_symlinks) = @_;
+  return is_file_type($path, $req_type, $follow_symlinks, 1);
+}
+
+sub is_exact_file_type_nofollow($$) {
+  my ($path, $req_type) = @_;
+  return is_file_type($path, $req_type, 0, 1);
+}
+
 noexport:; sub file_stats_cache_fill(+$$$$) {
   my ($cache, $path_key, $relative_path, $base_dir_fd, $follow_symlinks) = @_;
 
@@ -93,7 +146,7 @@ noexport:; sub file_stats_cache_fill(+$$$$) {
 
   my @stats = sys_fstatat($base_dir_fd // AT_FDCWD, $relative_path, $flags);
 
-  if (!scalar @stats) { return undef; }
+  if (!@stats) { return undef; }
 
   fixup_nanosec_file_timestamps(@stats);
 
