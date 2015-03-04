@@ -1,0 +1,43 @@
+#!/bin/bash
+F=`basename $0`
+[[ -z "$GCCDIR" ]] && GCCDIR=$(dirname $(/usr/bin/gcc -print-prog-name=cc1))
+
+GCC_LOGFILE=/run/tmp/gcc-ppid-$PPID.log
+
+REALF=/usr/bin/$F
+[[ $F = cc1 || $F = cc1plus ]] && REALF=$GCCDIR/$F
+
+unset COLORIZE_GCC_DISABLED
+if [[ "$COLORIZE_GCC" ]]; then
+  case $COLORIZE_GCC in
+    off|no|n|disabled|skip|0)  COLORIZE_GCC_DISABLED=1 ;;
+  esac
+fi
+
+[[ "$COLORIZE_GCC_DISABLED" || ! -t 2 ]] && exec $REALF $@
+
+#
+# Original (but slower) way that unconditionally
+# piped gcc's stderr messages to colorize-gcc:
+#
+# set -o pipefail
+# ($REALF $@ 2>&1 1>&3 | colorize-gcc) 3>&1
+#
+
+$REALF $@ 2>$GCC_LOGFILE
+RC=$?
+
+if [[ $RC != 0 || -s $GCC_LOGFILE ]]; then
+  colorize-gcc < $GCC_LOGFILE > $GCC_LOGFILE.out
+  if [[ $(wc -l < $GCC_LOGFILE.out) -gt $LINES ]]; then
+    less $GCC_LOGFILE.out --quit-on-intr --quit-at-eof
+  else
+    cat $GCC_LOGFILE.out
+  fi
+  rm -f $GCC_LOGFILE.out
+fi
+
+rm -f $GCC_LOGFILE 2>/dev/null
+exit $RC
+
+

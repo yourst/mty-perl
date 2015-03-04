@@ -1,0 +1,33 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# Convert Emacs font lock face color definitions 
+# into Perl fg_color_rgb(...) declarations:
+#
+
+print("my %emacs_colors = (\n");
+
+my $emacs_fg_bg_color_re =
+  qr{\: ((?>back|fore)ground) \s++ \" \# (\w\w) (\w\w) (\w\w) \"}oamsx;
+
+my $emacs_face_colors_re = 
+  qr{^ \s*+ ' \( (\S++) \s++ 
+  [^\:]*+ $emacs_fg_bg_color_re
+  (?> [^\:]*+ $emacs_fg_bg_color_re)?}oamsx;
+
+sub color_spec($$$$$) {
+  my ($name, $fgbg, $r, $g, $b) = @_;
+  $fgbg = ($fgbg eq 'background') ? 'bg' : 'fg';
+
+  return '  '.($name =~ s/[^\w]+/_/roamsxg).'_'.$fgbg.' => '.
+    $fgbg.'_color_rgb('.join(', ', hex($r), hex($g), hex($b)).'),';
+}
+
+while (<>) {
+  my ($name, $fg_bg_1, $r1, $g1, $b1, $fg_bg_2, $r2, $g2, $b2) = ($_ =~ /$emacs_face_colors_re/oamsx);
+  next if (!defined $name);
+  print(color_spec($name, $fg_bg_1, $r1, $g1, $b1)."\n") if (defined $fg_bg_1);
+  print(color_spec($name, $fg_bg_2, $r2, $g2, $b2)."\n") if (defined $fg_bg_2);
+}
+
+print(");\n");

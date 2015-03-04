@@ -1,0 +1,14 @@
+found_perl_packages := Data/Alias IO/Dirent Linux/UserXAttr List/MoreUtils POSIX/2008 PPI PPI/Cache PPI/Document PPI/Dumper PPI/Statement PPI/Structure PPI/Token
+perl_package_version[List/MoreUtils] := 0.402
+perl_package_version[POSIX/2008] := 0.03
+perl_package_version[PPI/Cache] := 1.220
+perl_package_version[IO/Dirent] := 0.05
+perl_package_version[Linux/UserXAttr] := 0.02
+perl_package_version[Data/Alias] := 1.18
+perl_package_version[PPI] := 1.220
+perl_package_version[PPI/Dumper] := 1.220
+perl_package_version[PPI/Structure] := 1.220
+perl_package_version[PPI/Statement] := 1.220
+perl_package_version[PPI/Document] := 1.220
+perl_package_version[PPI/Token] := 1.220
+ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED := 1

@@ -1,0 +1,283 @@
+#!/usr/bin/perl -w
+# -*- cperl-*-
+#
+# perl-mod-deps-standalone
+#
+# Copyright 2015 Matt T Yourst <yourst@yourst.com>. All rights reserved.
+#
+
+use integer; use warnings;
+use Module::CoreList;
+
+use constant { NL => "\n" };
+
+# Find all modules already distributed with Perl itself:
+my %core_modules = (map { ($_, 1) } (Module::CoreList->find_modules(qr{}oax)));
+
+my $perl_package_name_re = qr{(?> [A-Za-z\_] \w*+ (?> \:\: \w++)*+)}oamsx;
+my $perl_package_decl_re = qr{(?> \b package \s++ ($perl_package_name_re) \s*+ ;)}oamsx;
+my $perl_package_use_re = qr{(?> \b (?: use | require) \s++ ($perl_package_name_re) \b)}oamsx;
+
+my $end_of_includes_re =
+  qr{(?> ^ \# pragma \s++ end_of_includes \b)}oamsx;
+
+my $perl_comment_re = 
+  qr{(?> (?! $end_of_includes_re) \# \N*+ \n) |
+     (?> ^ __END__ .*+ \Z)
+  }oamsx;
+
+my $perl_pod_doc_re = 
+  qr{^ = (pod | head[1-4] | over | item | b(?:ack|egin) | for | en(?:d|coding))
+     \N++ \n
+     (?> ^ (?! =cut) \N*+ \n)*+
+     ^ =cut \n
+  }oamsx;
+
+our $not_prefixed_by_sigil_re = qr{(?<! [\$\@\%\&\\]) \b}oamsx;
+
+our $perl_quoted_string_re = 
+  qr{(?|
+       (?> \" ((?: [^\"\\] | \\ .)*+) \") |
+       (?> \' ((?: [^\'\\] | \\ .)*+) \') |
+       (?: q[qwr]? (?|
+           \{ ((?: [^\}\\] | \\ .)*+) \} |
+           \( ((?: [^\)\\] | \\ .)*+) \) |
+           \[ ((?: [^\]\\] | \\ .)*+) \] |
+           \< ((?: [^\>\\] | \\ .)*+) \> |
+           (([\~\`\!\@\#\$\%\^\&\*\-\=\+\|\\\;\:\'\"\,\.\/\\\?]) .*? \g{-1})
+         )
+       )
+     )
+  }oamsx;
+
+our $strip_from_perl_source_re =
+  qr{(?> $perl_comment_re) | (?> $perl_quoted_string_re) | (?> $perl_pod_doc_re)}oamsx;
+
+our $perl_identifier_re =
+  qr{[A-Za-z\_] \w*}oamsx;
+
+our $perl_program_first_line_shebang_re = 
+  qr{^ \#\! \s*+ \S*? perl \b}oamsx;
+
+my $perl_package_decl_or_use_re = 
+  qr{$perl_package_decl_re | $perl_package_use_re | $end_of_includes_re}oamsx;
+
+my $undef_placeholder = '<undef>';
+
+sub printfd($;@) {
+  my ($fd, @args) = @_;
+
+  print($fd join('', (map { 
+    (!defined $_) ? $undef_placeholder :
+    ref($_) ? $_ : $_
+  } @args)));
+}
+
+sub prints { printfd(STDOUT, @_); }
+
+sub read_file($) {
+  my ($filename) = @_;
+
+  open(my $fd, '<', $filename) || return undef;
+
+  local $/; # turn off all line separators in this function
+
+  my $data = <$fd>;
+
+  close($fd);
+  return $data;
+}
+
+sub read_directory($) {
+  my ($dir) = @_;
+  
+  my @filenames = ( );
+
+  if (!opendir(my $fd, $dir)) {
+    warn("Cannot open '$dir' directory"); 
+    return @filenames;
+  }
+
+  @filenames = readdir($fd);
+
+  closedir($fd);
+  return @filenames;
+}
+
+my @filenames = ( );
+
+my $verbose = 0;
+my $deps_as_package_names = 0;
+my $print_file = 0;
+my $print_project_deps = 1;
+my $print_core_deps = 0;
+my $print_ext_deps = 0;
+my $print_all_project_deps = 0;
+my $print_all_core_deps = 0;
+my $print_all_ext_deps = 0;
+
+my %options = (
+  'f' => \$print_file,
+  'p' => \$print_project_deps,
+  'c' => \$print_core_deps,
+  'e' => \$print_ext_deps,
+  'x' => \$print_ext_deps,
+  'ap' => \$print_all_project_deps,
+  'ac' => \$print_all_core_deps,
+  'ae' => \$print_all_ext_deps,
+  'ax' => \$print_all_ext_deps,
+  'n' => \$deps_as_package_names,
+  'v' => \$verbose,
+);
+
+foreach my $arg (@ARGV) {
+  if ($arg =~ /^-(\w++)(\-?)$/oamsx) {
+    my $option = $1;
+    my $value = ($2 eq '-') ? 0 : 1;
+    my $varref = $options{$option};
+    if (defined $varref) { ${$varref} = $value; }
+    else { die("Unknown option '-$option'"); }
+  } else {
+    push @filenames, 
+      ($arg eq '-') ? '/dev/stdin' : 
+      (-d $arg) ? (map { $arg.'/'.$_ } read_directory($arg)) : 
+      $arg;
+  }
+}
+
+my %package_to_filename = ( );
+my %package_to_prereq_dep_list = ( );
+my $processed_file_count = 0;
+
+foreach my $filename (@filenames) {
+  $processed_file_count++;
+  if ((($processed_file_count & 0xff) == 255) && $verbose) {
+    printfd(STDERR, "\r".'Processing '.$filename.' ('.
+            $processed_file_count.' of '.scalar(@filenames).')');
+  }
+
+  my $code = read_file($filename);
+
+  if (!defined $code) {
+    warn('Cannot open "'.$filename.'"; skipping');
+    next;
+  };
+
+  $code =~ s{$strip_from_perl_source_re}{}oamsxg;
+
+  my $current_package = undef;
+  my $deps = undef; # deps of current package
+  
+  while ($code =~ /$perl_package_decl_or_use_re/oamsxg) {
+    my ($package_decl, $package_use, $end_of_includes) = ($1, $2, $3);
+
+    if (defined $package_decl) { 
+      $current_package = $package_decl;
+      $package_to_filename{$current_package} = $filename;
+      $deps = undef;
+      if ($verbose) { printfd(STDERR, 'pkg '.$current_package.' (in '.$filename.')'.NL); }
+    } elsif (defined $package_use) {
+      if (!defined $current_package) {
+        # Scripts don't usually define a package name,
+        # so use the filename instead:
+        $current_package = $filename;
+        $package_to_filename{$current_package} = $filename;
+        $deps = undef;
+        if ($verbose) { printfd(STDERR, 'pkg '.$current_package.' (implied by '.$filename.')'.NL); }
+      }
+
+      if (!defined $deps) {
+        $deps = $package_to_prereq_dep_list{$current_package} // { };
+        $package_to_prereq_dep_list{$current_package} = $deps;
+      }
+
+      $deps->{$package_use}++;
+      if ($verbose) { printfd(STDERR, 'use '.$package_use.NL); }
+
+      $package_to_prereq_dep_list{$package_use} //= { };
+    } elsif (defined $end_of_includes) {
+      if ($verbose) { printfd(STDERR, 'end of includes'.' (in '.$filename.')'.NL); }
+      last;
+    }
+  }
+}
+
+my %package_to_type = ( );
+
+use constant {
+  TYPE_TARGET  => 0,
+  TYPE_PROJECT => 1,
+  TYPE_CORE    => 2,
+  TYPE_EXT     => 3,
+};
+
+my %type_to_type_name = (
+  TYPE_TARGET,  'targ',
+  TYPE_PROJECT, 'proj',
+  TYPE_CORE,    'core',
+  TYPE_EXT,     'ext '
+);
+
+while (my ($package, $dephash) = each %package_to_prereq_dep_list) {
+  my $type = 
+    (exists $package_to_filename{$package}) ? TYPE_PROJECT :
+    (exists $core_modules{$package}) ? TYPE_CORE :
+    TYPE_EXT;
+  if ($verbose) { printfd(STDERR, $type_to_type_name{$type}.'  '.$package.NL); }
+  $package_to_type{$package} = $type;
+}
+
+my %all_projdeps = ( );
+my %all_extdeps = ( );
+my %all_coredeps = ( );
+
+foreach my $package (sort keys %package_to_prereq_dep_list) {
+  my $dephash = $package_to_prereq_dep_list{$package};
+  my $filename = $package_to_filename{$package};
+  my $type = $package_to_type{$package};
+  my @deps = (defined $dephash) ? (sort keys %$dephash) : ( );
+
+  next if ($type != TYPE_PROJECT);
+
+  my @coredeps = ( );
+  my @projdeps = ( );
+  my @extdeps = ( );
+
+  foreach my $prereq (@deps) {
+    my $type = $package_to_type{$prereq};
+    my $list = 
+      ($type == TYPE_PROJECT) ? \@projdeps :
+      ($type == TYPE_CORE) ? \@coredeps :
+      ($type == TYPE_EXT) ? \@extdeps :
+      undef;
+
+    die if (!defined $list);
+
+    my $prereq_file_or_pkg = 
+      ($deps_as_package_names) ? $prereq : ($package_to_filename{$prereq} // $prereq);
+
+    push @{$list}, $prereq_file_or_pkg;
+  }
+
+  foreach my $prereq (@projdeps) { push @{$all_projdeps{$prereq}}, $package; }
+  foreach my $prereq (@coredeps) { push @{$all_coredeps{$prereq}}, $package; }
+  foreach my $prereq (@extdeps) { push @{$all_extdeps{$prereq}}, $package; }
+
+  my $out = '';
+  my $file_or_pkg = ($deps_as_package_names) ? $package : 
+    ($filename // $package);
+
+  $out .= 'file['.$package.'] := '.$filename.NL if ($print_file);
+  $out .= 'deps['.$file_or_pkg.'] := '.join(' ', @projdeps).NL if ($print_project_deps);
+  $out .= 'extdeps['.$file_or_pkg.'] := '.join(' ', @extdeps).NL if ($print_ext_deps);
+  $out .= 'coredeps['.$file_or_pkg.'] := '.join(' ', @coredeps).NL if ($print_core_deps);
+
+  $out =~ s{::}{.}oamsxg;
+
+  prints($out) if (length $out);
+}
+
+prints(NL);
+prints('deps[ALL] := '.join(' ', sort keys %all_projdeps).NL) if ($print_all_project_deps);
+prints('extdeps[ALL] := '.join(' ', sort keys %all_extdeps).NL) if ($print_all_ext_deps);
+prints('coredeps[ALL] := '.join(' ', sort keys %all_coredeps).NL) if ($print_all_core_deps);

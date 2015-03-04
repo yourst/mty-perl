@@ -3,8 +3,9 @@
 
 use version;
 use constant { NL => "\n" };
+no warnings;
 
-my $package_and_version_re = qr{^ ([\w\:]++) (?> = (.+))?}oax;
+my $package_and_version_re = qr{^ ([\w\:]++) (?> @ (.+))?}oax;
 
 my %required_package_to_version = map {
   ($_ =~ $package_and_version_re) ? ($1 => ($2 // 0)) : 
@@ -46,25 +47,34 @@ while (my ($p, $v) = each %all_packages) {
 }
 
 if ((scalar keys %missing_packages) || (scalar keys %outdated_packages)) {
-  print('define missing_or_outdated_deps_warning :='.NL);
-  print(NL);
-  print('  This project depends on the following missing or outdated external Perl packages:'.NL);
-  print(NL);
+  print("EXT_PERL_PACKAGE_DEPS_CHECK_FAILED := 1".NL);
+
+  print(STDERR NL.('-' x 78).NL.(' ' x 11).
+       '*** ERROR ***  Missing Required External Perl Packages'.
+       (' ' x 11).NL.('-' x 78).NL.NL.
+      'The following required Perl packages are either missing or too old:'.NL.NL);
 
   foreach my $p (sort keys %missing_packages) { 
     my $req_ver = $required_package_to_version{$p};
-    print('  Missing:   '.$p.((defined $req_ver) ? '  (need at least v'.$req_ver.')' : '').NL); 
+    print(STDERR '  Missing:   '.$p.((defined $req_ver) ? '  (need at least v'.$req_ver.')' : '').NL); 
   }
 
   foreach my $p (sort keys %outdated_packages) { 
     my $req_ver = $required_package_to_version{$p};
     my $old_ver = $outdated_packages{$p};
 
-    print('  Outdated:  '.$p.'  (v'.$old_ver.' is too old; need at least v'.$req_ver.')'.NL); 
+    print(STDERR '  Outdated:  '.$p.'  (v'.$old_ver.' is too old; need at least v'.$req_ver.')'.NL); 
   }
 
-  print(NL);
-  print('endef'.NL);
+  print(STDERR
+    NL.'Please install and/or upgrade the packages listed above, then re-run make.'.NL.
+    'Perl packages may be installed using the \'cpan\' command or the standard)'.NL.
+    'package installation tool for your Linux distribution (e.g. \'rpm\', \'dpkg\'),'.NL.
+    'if your distribution provides the required Perl packages in that format).'.NL.NL.
+    'Cannot proceed until the packages above are installed or upgraded.'.NL.NL);
+
+  exit 255;
 } else {
   print("ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED := 1".NL);
+  exit 0;
 }

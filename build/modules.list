@@ -7,9 +7,11 @@ MTY/Common/GlobalOverride.pm
 MTY/Common/Hashes.pm
 MTY/Common/Misc.pm
 MTY/Common/ModuleCache.pm
+MTY/Common/PerlSourceTools.pm
 MTY/Common/PrintDebug.pm
 MTY/Common/StackTrace.pm
 MTY/Common/Strings.pm
+MTY/Common/Symbols.pm
 MTY/Display/ANSIColorREs.pm
 MTY/Display/ColorCapabilityCheck.pm
 MTY/Display/Colorize.pm
@@ -20,9 +22,11 @@ MTY/Display/PPITreeFormatter.pm
 MTY/Display/PrintableSymbolTools.pm
 MTY/Display/PrintableSymbols.pm
 MTY/Display/Scrollable.pm
+MTY/Display/StringFormats.pm
 MTY/Display/Table.pm
 MTY/Display/TextInABox.pm
 MTY/Display/Tree.pm
+MTY/Display/TreeBuilder.pm
 MTY/Filesystem/BtrFS.pm
 MTY/Filesystem/CurrentDir.pm
 MTY/Filesystem/EnhancedFileStats.pm
@@ -40,6 +44,8 @@ MTY/Filesystem/StatsCache.pm
 MTY/ListDeps/C.pm
 MTY/ListDeps/Config.pm
 MTY/ListDeps/ListDeps.pm
+MTY/ListDeps/Makefile.pm
+MTY/ListDeps/OutputFormats.pm
 MTY/ListDeps/Perl.pm
 MTY/ListDeps/Source.pm
 MTY/MakeAnalyzer/Common.pm

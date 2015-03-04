@@ -1,0 +1,22 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# lsdeps: 
+#
+# List dependencies (direct, recursive and inverse) of many file types:
+# C/C++, Perl, Python, Java, C#, shell scripts, makefiles, ELF and PE 
+# executables and more - virtually any file format capable of specifying
+# dependencies on other files through include directives (with file type
+# specific syntax)
+#
+# MTY::ListDeps::ListDeps: main module
+#
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
+#
+
+# use MTY::Common::ModuleCache;
+use MTY::ListDeps::ListDeps;
+
+my $rc = main(@ARGV);
+exit $rc;
+

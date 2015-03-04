@@ -25,8 +25,6 @@ use MTY::RegExp::Strings;
 use MTY::RegExp::PerlSyntax;
 use MTY::RegExp::Numeric;
 
-use Unicode::String qw(utf8);
-
 my $no_scrollable = 0;
 my $quiet = 0;
 
@@ -38,18 +36,23 @@ binmode STDERR, ':utf8';
 my $print_format;
 my $first_unicode;
 my $char_count = 256;
-my $repeat_count = 1;
+my $repeat_count = 4;
 # by default, if the specified character name is exactly matched,
 # only print that single character. Otherwise print any character
 # names containing the specified name as a substring.
 my $show_all_wildcard_matches = 1;
 my $show_utf8 = 1;
+my $show_chars_from_stdin = 0;
+my $stdin_chars_to_constant_defs = 0;
 
 my %char_id_to_name = ( );
+
 while ((my $name, $c) = each %symbols) {
   next if ((length $c) > 1); # we don't handle multi-char meta-symbols here
   $char_id_to_name{ord($c)} = $name;
 }
+
+my %symbol_name_to_group = ( );
 
 use constant {
   UNNAMED_CODE_ONLY    => 0,
@@ -75,6 +78,7 @@ sub expand_sym_list(+) {
       ($_ =~ /\A \/ ([^\/]++) \/ \Z/oax) ? $1 : undef;
     ((defined $expr) ? '(?>'.$expr.')' : ( ))
   } @$initial_list);
+
   if (!$show_all_wildcard_matches) { $re = '\A(?>'.$re.')\Z'; }
   $re = qr{$re}oax;
 
@@ -112,35 +116,63 @@ sub expand_sym_list(+) {
   return (wantarray ? @sym_list : \@sym_list);
 }
 
+use constant {
+  light_bg_color => bg_gray(48),
+  light_heading_bg_color => bg_color_rgb(0, 64, 0),
+};
+
+use constant {
+  dark_bg_color => scale_rgb_bg(light_bg_color, RATIO_2_3),
+  dark_heading_bg_color => scale_rgb_bg(light_heading_bg_color, RATIO_2_3),
+};
+
 sub show_all_printable_symbols(;+$) {
   if (defined($_[1])) { return show_all_printable_symbols_using_format(@_); }
 
   my @sym_list = expand_sym_list($_[0]);
+  my $out = '';
+
+  # if ($show_raw_output) {
+  #   $out = join('', (map {
+  #     my ($name, $symbol, $found_by) = @$_;
+  #     ($only_show_chars) ? ($symbol) : 
+  #     ($only_show_utf16_codes) ? (hexstring(ord($symbol)).NL) : '';
+  #   } @sym_list));
+  #   return $out;
+  # }
 
   my $max_name_len = 0;
+
   foreach my $info (@sym_list) {
     my ($name, $symbol, $found_by) = @$info;
     set_max($max_name_len, length($name));
   }
 
-  my $out = NL.$G.$U.'Showing '.$C.(scalar @sym_list).$G.' printable Unicode symbols:'.$X.NL.NL;
+  $out = NL.$G.$U.'Showing '.$C.(scalar @sym_list).$G.' printable Unicode symbols:'.$X.NL.NL;
 
-  my @table = ( [ map { C.U.$_.X } ('Glyph'.X.TAB, 'Name', 'Unicode', 'UTF-8', 'Glyph', 'Composition') ] );
+  my $heading_row = [
+    (X.' '.light_heading_bg_color.CLEAR_REST_OF_LINE.' '.C.U.'Glyph'.UX), 
+    (map { C.U.$_.UX } qw(Name Unicode UTF-8 Glyphs Composition)),
+  ];
+  
+  my @table = ( $heading_row );
 
-  foreach my $info (@sym_list) {
+  while (my ($line, $info) = each @sym_list) {
     my ($name, $symbol, $found_by) = @$info;
 
     my @utf8_chars = split('', utf8_encode_str($symbol));
     my $utf8_encoding = join('', map { sprintf(K.'\\'.M.'%-3o', ord($_)) } @utf8_chars);
     # Don't literally print the escape character, since it may screw up the terminal state:
     if (ord($symbol) == 0x1B) { $symbol = chr(0x2400 + ord($symbol)); }
+    my $bg_color = ($line & 1) ? dark_bg_color : light_bg_color;
     my $row = [
-      CLEAR_LINE.W.$symbol.TAB,
+      X.' '.CLEAR_LINE.$bg_color.W.' '.$symbol.' ',
       $found_by_to_color[$found_by].$name,
       K_3_4.double_left_angle_bracket.G_2_3.'0x'.G.sprintf('%04x', ord($symbol)).K_3_4.double_right_angle_bracket.
-        ((length($symbol) > 1) ? R.large_plus.' '.X : ''),
+        ((length($symbol) > 1) ? R.large_plus.' ' : ''),
       M.$utf8_encoding,
-      X.($symbol x $repeat_count)
+      W.($symbol x $repeat_count),
+      '    '.TAB
     ];
 
     # Multi-character composite symbol: print all of its characters in order
@@ -152,7 +184,7 @@ sub show_all_printable_symbols(;+$) {
     push @table, $row;
   }
 
-  $out .= format_table(@table, row_prefix => '  ', colseps => '  ');
+  $out .= format_table(@table, row_prefix => '', colseps => '  ');
   return $out;
 }
 
@@ -181,9 +213,9 @@ sub show_all_printable_symbols_using_format(;$$) {
        'c' => $symbol,
        's' => $symbol,
        'd' => $ord,
-       'x' => sprintf('%x', $ord),
-       'o' => sprintf('%o', $ord),
-       'b' => sprintf('%b', $ord));
+       'x' => sprintf('0x%x', $ord),
+       'o' => sprintf('0%o', $ord),
+       'b' => sprintf('0b%b', $ord));
   
      $out .= subst_percent_prefixed_single_chars_using_hash_of_mappings
       ($format, \%subst_hash);
@@ -199,21 +231,32 @@ sub show_unicode_block($;$) {
 
   my $out = '';
 
-  for (my $i = $start; $i < $start + $count; $i++) {
-    if (($i % 256) == 0) {
-     $out .= CLEAR_LINE.NL;
+  $out .= X.' '.light_heading_bg_color.CLEAR_REST_OF_LINE.Y.'        ';
+  foreach my $i (0..15) { $out .= TAB.' '.sprintf('%x', $i); }
+  $out .= TAB.X.CLEAR_REST_OF_LINE.NL;
+
+  for my $i ($start..($start + $count)) {
+    # if (($i % 256) == 0) { $out .= CLEAR_LINE; }
+    my $line = $i / 16;
+    my $col = $i % 16;
+    if ($col == 0) {
+      my $heading_bg_color = ($line & 1) ? 
+        light_heading_bg_color : dark_heading_bg_color;
+      my $bg_color = ($line & 1) ? light_bg_color : dark_bg_color;
+      $out .= X.' '.$heading_bg_color.' '.K.'0x'.Y.
+        sprintf('%04x', $i).K.' '.Y_1_2.long_narrow_vert_bar.$bg_color.CLEAR_REST_OF_LINE.W;
     }
-    if (($i % 16) == 0) {
-      $out .= CLEAR_LINE.sprintf('  '.$K.'0x'.$Y.'%04x'.$K.':'.$X, $i);
-    }
-    $out .= TAB.chr($i);
+    my $found = exists $char_id_to_name{$i};
+    $out .= G if ($found);
+    $out .= TAB.' '.chr($i).' ';
+    $out .= W if ($found);
 
     if (($i % 16) == 15) {
-      $out .= NL.CLEAR_REST_OF_LINE;
+      $out .= TAB.X.CLEAR_REST_OF_LINE.NL;
     }
   }
 
-  $out .= NL;
+  $out .= TAB.X.CLEAR_REST_OF_LINE.NL;
   return $out;
 }
 
@@ -229,6 +272,10 @@ my %command_line_options= (
   'all' => [ \$show_all_wildcard_matches, 0, [ 'a' ] ],
   'exact' => [ \$show_all_wildcard_matches, 0, [ 'x' ], 0, 1 ],
   'utf8' => [ \$show_utf8, 0, [ 'u' ] ],
+  'codes-only' => [ \$print_format, 0, [ 'codes' ], "%x\n", ],
+  'chars-only' => [ \$print_format, 0, [ 'chars' ], "%c\n", ],
+  'stdin' => [ \$show_chars_from_stdin, 0, [ 'show', 'show-stdin' ] ],
+  'defs' => [ \$stdin_chars_to_constant_defs, 0, [ 'stdin-to-defs' ] ],
   'quiet' => [ \$quiet, 0, [ 'q' ] ],
 );
 
@@ -242,10 +289,41 @@ my @command_line_options_help = (
   'all' => 'Show all characters whose names contain any of the specified substrings',
   'exact' => 'Only show characters whose names exactly match the names specified',
   'utf8' => 'Show or hide the equivalent UTF-8 bytes for each character',
+  'stdin' => 'Show information for each UTF-8 character read from stdin',
+  'defs' => 'Print Perl style constant definitions for each UTF-8 character read from stdin',
   'quiet' => 'Do not display banners, table headings or any text but character list',
 );
 
 my ($args, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
+
+my $show_raw_output = ($stdin_chars_to_constant_defs || (defined $format));
+$quiet = 1 if ($show_raw_output);
+
+my $from_stdin = $show_chars_from_stdin || $stdin_chars_to_constant_defs;
+
+if ($from_stdin) {
+  if (stdin_is_terminal()) 
+    { warning('stdin is from terminal; showing the characters you type...'); }
+
+  my $chars_from_stdin = read_file_handle(STDIN);
+  utf8::decode($chars_from_stdin);
+  my @chars_from_stdin = split(//, $chars_from_stdin);
+
+  while (my ($i, $c) = each @chars_from_stdin) {
+    my $code = ord($c);
+    my $hexcode = hexstring($code);
+    if ($show_chars_from_stdin) {
+      push @$args, $hexcode;
+    } elsif ($stdin_chars_to_constant_defs) {
+      prints('  char_', $hexcode, ' => chr(', $hexcode, '),', NL);
+    }
+  }
+
+  if ($stdin_chars_to_constant_defs) {
+    # Exit now rather than polluting the output with info we don't want:
+    exit(0);
+  }
+}
 
 $first_unicode = parse_integer($first_unicode) if defined($first_unicode);
 $last_unicode = parse_integer($last_unicode) if defined($last_unicode);
@@ -270,7 +348,8 @@ if ($char_count < 0) { die('Character index specified by "-end '.
 }
 
 my @all_symbol_names = sort keys %symbols;
-my $list = (scalar @char_code_list) ? \@char_code_list : \@all_symbol_names;
+my $list = (@char_code_list) ? \@char_code_list : \@all_symbol_names;
+$show_all_wildcard_matches = 0 if (!@char_code_list);
 
 my $out = '';
 
@@ -288,13 +367,13 @@ if (defined($first_unicode)) {
 my $lines = scalar(split(/\n/oamsx, $out));
 my $console_lines = get_terminal_height_in_lines() - 2;
 
-$outfd = ($no_scrollable || ($lines < $console_lines)) ? STDOUT : (open_scrollable_stream() // STDOUT);
+$outfd = ((defined $format) || $no_scrollable || ($lines < $console_lines)) ? STDOUT : (open_scrollable_stream() // STDOUT);
 
 #
 # Make sure the console's tab stops are set to 
 # column 8 and then every 4 characters thereafter: 
 #
-set_tab_stops('8', '+4');
+set_tab_stops('8', '+4') if (!defined $format);
 
 printfd($outfd, $out);
 

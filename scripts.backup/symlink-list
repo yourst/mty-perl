@@ -1,0 +1,169 @@
+#!/usr/bin/perl -w
+
+use warnings; no integer;
+
+use MTY::Common::Common;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Filesystem::PathCache;
+use MTY::Common::CommandLine;
+use MTY::Display::Colorize;
+use MTY::RegExp::Strings;
+use MTY::System::POSIX;
+
+my $filename_spec_re = 
+  qr{(?| 
+       (?> $quoted_string_re) | 
+       (?> ([^\t]++) (?= \t | $)) |
+       (?> ([^=]++) (?= = | $)) |
+       (?> (\S++) (?= \s++ | $))
+     )}oax;
+
+my $input_line_re = qr{^ $filename_spec_re [\s\t\=]++ $filename_spec_re $}oax;
+
+my $reverse_order = 0;
+my $input_format = '%T\t%L';
+my $preserve_existing_links = 0;
+my $force_replace_files_with_links = 0;
+my $check_if_target_exists = 0;
+my $warn_if_target_missing = 0;
+my $dry_run = 0;
+my $verbose = 0;
+my $print_summary = 1;
+
+my %command_line_options = (
+  'format' => [ \$input_format, OPTION_VALUE_REQUIRED, [qw(i fmt)] ],
+  'reverse' => [ \$reverse_order, 0, [qw(r rev link-then-target)] ],
+  'preserve' => [ \$preserve_existing_links, 0, ['p'] ],
+  'force' => [ \$force_replace_files_with_links, 0, ['f'] ],
+  'check' => [ \$check_if_target_exists, 0, ['c'] ],
+  'warn' => [ \$warn_if_target_missing, 0, ['w'] ],
+  'dry-run' => [ \$dry_run, 0, [qw(t dryrun test)] ],
+  'verbose' => [ \$verbose, 0, ['v'] ],
+  'summary' => [ \$print_summary, 0, ['s'] ],
+);
+
+my @command_line_options_help = (
+  [ OPTION_HELP_CATEGORY ] => 'Options',
+  'reverse' => 'Reverse order so symlink to create comes first (i.e. "<symlink> <target>")',
+  'preserve' => 'If output is already a symlink to a different target, do not redirect it',
+  'force' => 'If output is a file or directory, replace it with a symlink (original will be lost!)',
+  'check' => 'Check if each target actually exists, and do not create dangling link if it is missing',
+  'warn' => 'Print warning for each target that did not exist (regardless of -check option)',
+  'dry-run' => 'Only print what actions would be taken, without actually making any changes',
+  'verbose' => 'Print actions taken (see below)',
+  'summary' => 'Print summary of number of links affected by each action',
+
+  [ OPTION_HELP_CATEGORY ] => 'Action symbols printed by -verbose',
+  [ OPTION_HELP_WRAPPED ] => 
+    G.'=='.X.TAB.'Output was already a symlink to the specified target (no action needed)'.NL.
+    G.'->'.X.TAB.'New symlink created'.NL.
+    G.'~>'.X.TAB.'Existing symlink redirected to specified target'.NL.
+    G.'!>'.X.TAB.'Target of symlink did not exist'.NL.
+    G.'X>'.X.TAB.'File or directory replaced with symlink'.NL,
+);
+
+my ($filename_pairs, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
+
+if (!@$filename_pairs) {
+  while (<STDIN>) {
+    chomp;
+    push @$filename_pairs, $_;
+  }
+}
+
+my $rc = 0;
+
+my %actions = (
+  existing  => [ 0, '==' ],
+  new       => [ 0, '->' ],
+  updated   => [ 0, '~>' ],
+  preserved => [ 0, '!=' ],
+  missing   => [ 0, '!?' ],
+  overwrite => [ 0, 'X>' ],
+  errors    => [ 0, '!!' ],
+);
+
+sub do_symlink($$;$) {
+  my ($from, $to, $no_unlink) = @_;
+  return 0 if ($dry_run);
+
+  unlink($to) unless ($no_unlink);
+  return symlink($from, $to);
+}
+
+foreach (@$filename_pairs) {
+  if (/$input_line_re/oax) {
+    my ($from, $to) = (($reverse_order) ? ($2, $1) : ($1, $2));
+    my ($old_is_symlink, $old_symlink_target) = path_is_symlink($to);
+
+    #
+    # Symlink targets are relative to the directory containing the symlink,
+    # not the current directory we happen to be in:
+    #
+    my $from_rel_path = (is_absolute_path($from)) ? $from : 
+      directory_of($to).'/'.$from;
+
+    my $target_exists = ($check_if_target_exists) ? path_exists($from_rel_path) : 1;
+    my $action = '';
+    my $symlink_rc = 1;
+
+    if (!$target_exists) {
+      if ($verbose || $warn_if_target_missing) { 
+        print(STDERR 'Warning: target "'.$from.'" does not exist; not creating dangling link "'.$to.'"'.NL); 
+        # delete the existing dangling link to avoid future problems:
+        if ($old_is_symlink) { unlink($to); }
+      }
+      $action = 'missing';
+    } elsif ($old_is_symlink > 0) {
+      if ($old_symlink_target eq $from) {
+        $action = 'existing';
+      } else {    
+        if (!$preserve_existing_links) {
+          $action = 'updated';
+          $symlink_rc = do_symlink($from, $to);
+        } else {
+          $action = 'preserved';
+        }
+      }
+    } elsif ($old_is_symlink == 0) {
+      # target exists but is not a symlink (i.e. it's a file or directory):
+      if ($force_replace_files_with_links) {
+        $action = 'overwrite';
+        $symlink_rc = do_symlink($from, $to);
+      }
+    } elsif ($old_is_symlink < 0) { 
+      # (file does not even exist - no action needed)
+      $action = 'new';
+      $symlink_rc = do_symlink($from, $to, 1);
+    }
+
+    if (!$symlink_rc) {
+      print(STDERR 'Warning: cannot symlink "'.$from.'" to "'.$to.'" ('.$!.')'.NL); 
+      $rc = 1;
+      $action = 'errors';
+    }
+
+    my $action_specs = $actions{$action};
+    $action_specs->[0]++;
+    my $symbol = $action_specs->[1];
+    if ($verbose) { print($symbol.'  '.$from.'  '.$symbol.'  '.$to.NL); }
+  }
+}
+
+sub summarize_action($$) {
+  my ($name, $counter) = @_;
+  my @out = ($counter > 0) ? ($counter.' '.$name) : ( );
+  return @out;
+}
+
+if ($print_summary) {
+  print(join(', ', map {
+    my $spec = $actions{$_};
+    my ($n, $sym) = @$spec;
+    ($n > 0) ? ($n.' '.$_.' ('.$sym.')') : ( );
+  } sort keys %actions).NL);
+};
+
+exit $rc;
+

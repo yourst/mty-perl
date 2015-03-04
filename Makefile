@@ -5,14 +5,34 @@
 # Copyright 2014 Matt T. Yourst <yourst@yourst.com>
 #
 
+PROJECT := mty-perl
+
 default: all
 
 .PHONY: default sync-modules install-modules sync-scripts install-scripts sync install-without-sync install info clean commit push all
+.SILENT:
 
 GENERATED_MAKE_INCLUDES := build/perl-config.mk build/modules.mk build/perl-scripts.mk build/deps.mk build/extdeps.mk
 
-include functions.mk
+include scripts/functions.mk
 
+#
+# Ensure all of our scripts we need for the build process
+# are actually in the PATH exported to child processes when
+# Makefile recipes are executed. Also ensure the PERLLIB 
+# variable includes our current project directory:
+#
+
+SOURCEDIR := $(realpath ${CURDIR})
+BUILDDIR := ${SOURCEDIR}/build
+
+PATH := $(call prepend_if_missing,${SOURCEDIR}/scripts:,${PATH})
+PERLLIB := $(call prepend_if_missing,${SOURCEDIR}:,${PERLLIB})
+PERL5LIB := $(call prepend_if_missing,${SOURCEDIR}:,${PERL5LIB})
+
+#
+# Set important make control variables:
+#
 ifneq (,$(filter clean,${MAKECMDGOALS}))
 SKIP_MAKE_INCLUDES := 1
 endif # MAKECMDGOALS != clean
@@ -29,97 +49,125 @@ INSTALLED_PERL_SCRIPTS_DIR := /usr/local/bin
 ifndef SKIP_MAKE_INCLUDES
 
 #----------------------------------------------------------------------------+
-# Determine the current Perl version and its standard library directories:   +
+# Determine the current Perl version and its standard library directories,   |
+# then cache these details in build/perl-config.mk for future builds.        |
 #----------------------------------------------------------------------------+
 
--include build/perl-config.mk
+build:
+	@mkdir -p ${SOURCEDIR}/build
 
+PERL_CONFIG_MK := build/perl-config.mk
 PERL_CONFIG_VARS := VERSION ARCHNAME PERLPATH SITELIB SITEARCH 
+query-perl-config: ${PERL_CONFIG_MK}
+${PERL_CONFIG_MK}: ${perl_perlpath} Makefile | build
+	$(call print_build,(config),Querying and caching current Perl configuration details...)
+	scripts/query-perl-config ${PERL_CONFIG_VARS} > ${PERL_CONFIG_MK} || \
+		{ echo 'Cannot query Perl configuration - is Perl installed?'; false; }	
 
-define get_perl_config_script
-use Config;
-foreach my $$k (qw(${PERL_CONFIG_VARS})) 
-  { print("PERL_".uc($$k)." := ".$$Config{lc($$k)}."\n"); }
-endef # get_perl_config_script
+-include ${PERL_CONFIG_MK}
 
-ifeq (,${PERL_VERSION})
-# Build perl-config.mk for the first time:
-$(call print_build,config,Querying and caching current Perl configuration details...)
-$(shell mkdir -p build && perl -e '${get_perl_config_script}' > build/perl-config.mk)
-$(call include,build/perl-config.mk)
-ifeq (,${PERL_VERSION})
-$(error Cannot query Perl configuration - is Perl installed?)
-endif # (missing PERL_* definitions)
-$(foreach var,$(addprefix PERL_,${PERL_CONFIG_VARS}),$(info ${TAB}${TAB} - ${var}${TAB}= ${${var}}))
-$(info )
-else # PERL_VERSION is set
-# Declare a rule to ensure perl-config.mk is rebuilt 
-# if the perl version and/or paths have changed:
-build/perl-config.mk: ${perl_perlpath} Makefile | build
-	$(file >build/get-perl-config.pl,${get_perl_config_script})
-	perl build/get-perl-config.pl > $@
-endif # PERL_VERSION
+#----------------------------------------------------------------------------+
+# Check that the machine on which we're compiling this actually has all      |
+# of the aforementioned required external dependencies properly installed:   |
+# (This is only done the first time make is run from a given source tree).   |
+#----------------------------------------------------------------------------+
 
--include build/extdeps.mk
+EXTDEPS_REQUIRED_MK := scripts/extdeps-required.mk
+-include ${EXTDEPS_REQUIRED_MK}
 
-ifneq (1,$(ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED))
-$(call print_build,config,Checking availability and versions of required external Perl modules...)
-REQUIRED_EXT_PERL_PACKAGES_AND_VERSIONS := Exporter::Lite POSIX::2008=0.03 Linux::UserXAttr=0.02 PPI=1.2 Regexp::Optimizer=0.2 Unicode::String=2.08.52
-REQUIRED_EXT_PERL_PACKAGES := $(foreach pv,${REQUIRED_EXT_PERL_PACKAGES_AND_VERSIONS},$(firstword $(subst =, ,${pv})))
-$(shell scripts/check-ext-deps ${REQUIRED_EXT_PERL_PACKAGES_AND_VERSIONS} >& build/extdeps.mk)
-include build/extdeps.mk
-$(info )
-ifneq (1,$(ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED))
-$(info ${missing_or_outdated_deps_warning})
-$(info Please install and/or upgrade the packages listed above, then re-run make.)
-$(info Perl packages may be installed using the 'cpan' command or the standard)
-$(info package installation tool for your Linux distribution (e.g. 'rpm', 'dpkg'),)
-$(info if your distribution provides the required Perl packages in that format).
-$(info )
-$(error Cannot proceed until the packages above are installed or upgraded.)
-endif # ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED != 1
-endif # ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED != 1
+EXTDEPS_CHECKED_MK := build/extdeps-checked.mk
+check-ext-deps: ${EXTDEPS_CHECKED_MK}
+${EXTDEPS_CHECKED_MK}: ${EXTDEPS_REQUIRED_MK} ${PERL_CONFIG_MK} scripts/check-ext-deps ${perl_perlpath} | build
+	$(call print_build,(config),Checking availability and versions of required external Perl modules...)
+	scripts/check-ext-deps ${EXTERNAL_PERL_PACKAGE_DEPS} > ${EXTDEPS_CHECKED_MK}
+
+#	$(if $(filter 1,${ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED}),,$(info ${missing_or_outdated_deps_warning})$(error (Aborting make)))
+
+-include ${EXTDEPS_CHECKED_MK}
 
 #
 # PERL_MODULES / MTY/build/modules.mk (persistent cached make variable)
 #
--include build/modules.mk
-ifeq (,${PERL_MODULES})
-GENERATE_MODULES_LIST := 1
-endif # ! PERL_MODULES
 
-ifdef GENERATE_MODULES_LIST
+-include build/modules.mk
+
+ifeq (,${PERL_MODULES})
 PERL_MODULES := $(call find_files_recursively,MTY,*.pm)
-endif # GENERATE_MODULES_LIST
+endif # ! PERL_MODULES
 
 PERL_MODULE_DIRS := $(sort $(patsubst %/,%,$(dir ${PERL_MODULES})))
 
-PERL_BUNDLE_MODULES := $(addsuffix /All.pm,${PERL_MODULE_DIRS})
+SKIP_BUNDLE_FOR := MTY/ListDeps MTY/PerlModDeps MTY/MakeAnalyzer MTY/System
+PERL_MODULE_BUNDLE_DIRS := $(filter-out ${SKIP_BUNDLE_FOR},${PERL_MODULE_DIRS})
+# PERL_MODULE_BUNDLES := $(addsuffix .pm,${PERL_MODULE_BUNDLE_DIRS})
+PERL_MODULE_BUNDLES := 
 
-ifdef GENERATE_MODULES_LIST
-# (We only do this at installation time now):
-# PERL_MODULES += ${PERL_BUNDLE_MODULES}
-endif
-
-build/modules.mk: ${PERL_MODULE_DIRS} build/perl-config.mk | build
-	$(file >$@,PERL_MODULES := ${PERL_MODULES})
-
-build/modules.list: ${PERL_MODULE_DIRS} build/perl-config.mk | build
-	$(file >$@,$(subst ${SPACE},${NL},${PERL_MODULES}))
+build/modules.mk build/modules.list: ${PERL_MODULE_DIRS} ${EXTDEPS_CHECKED_MK} | build
+	$(call print_build,(prep),Finding all Perl modules (*.pm) to create lists in build/modules.mk and build/modules.list)
+	$(file >build/modules.mk,PERL_MODULES := ${PERL_MODULES})
+	$(file >build/modules.list,$(subst ${SPACE},${NL},${PERL_MODULES}))
 
 #
 # PERL_SCRIPTS / scripts/build/perl-scripts.mk (persistent cached make variable)
 #
 -include build/perl-scripts.mk
+
 ifeq (,${PERL_SCRIPTS})
 PERL_SCRIPTS := $(call find_scripts_handled_by_interpreter,perl,scripts/*)
 endif # ! PERL_SCRIPTS
 
-build/perl-scripts.mk: scripts build/perl-config.mk | build
-	$(file >$@,PERL_SCRIPTS := ${PERL_SCRIPTS}) 
+build/perl-scripts.mk build/perl-scripts.list: scripts ${EXTDEPS_CHECKED_MK} | build
+	$(call print_build,(prep),Finding all Perl scripts in scripts/ to create lists in build/perl-scripts.mk and build/perl-scripts.list)
+	$(file >build/perl-scripts.mk,PERL_SCRIPTS := ${PERL_SCRIPTS}) 
+	$(file >build/perl-scripts.list,$(subst ${SPACE},${NL},$(notdir ${PERL_SCRIPTS})))
 
-build/perl-scripts.list: scripts build/perl-config.mk | build
-	$(file >$@,$(subst ${SPACE},${NL},$(notdir ${PERL_SCRIPTS})))
+#----------------------------------------------------------------------------+
+# Determine which external Perl packages and modules we actually require:    |
+# Note that extdeps-required.mk is *NOT* automatically regenerated every     |
+# time the source code is altered to add or remove imported packages,        |
+# since that would be a waste of time, given how rarely these dependencies   |
+# genuinely change. Therefore, 'make extdeps-required' must be run manually. |
+#----------------------------------------------------------------------------+
+
+LSDEPS_EXTDEPS_ARGS := -symbolic -external -one-per-line -raw ${PERL_SCRIPTS} ${PERL_MODULES} 2>/dev/null | sort -u
+
+define extdeps_mk_contents
+$(info Executing: lsdeps -sysdeps ${LSDEPS_EXTDEPS_ARGS})
+$(info Executing: lsdeps -coredeps ${LSDEPS_EXTDEPS_ARGS})
+EXTERNAL_PERL_PACKAGE_DEPS := $(shell lsdeps -sysdeps ${LSDEPS_EXTDEPS_ARGS})
+PERL_CORE_PACKAGE_DEPS := $(shell lsdeps -coredeps ${LSDEPS_EXTDEPS_ARGS})
+ALL_REQUIRED_EXTERNAL_PERL_PACKAGES = ${EXTERNAL_PERL_PACKAGE_DEPS} ${PERL_CORE_PACKAGE_DEPS}
+PERL_VERSION_REQUIRED  := ${PERL_VERSION}
+endef # extdeps_mk_contents
+
+EXTDEPS_REQUIRED_MK := scripts/extdeps-required.mk
+extdeps-required: ${EXTDEPS_REQUIRED_MK}
+
+${EXTDEPS_REQUIRED_MK}: ${perl_perlpath} scripts/lsdeps $(wildcard MTY/ListDeps/*.pm) | build
+	$(file >$@,${extdeps_mk_contents})
+	$(eval include ${EXTDEPS_REQUIRED_MK})
+	$(info )
+	$(info This project (${PROJECT}) depends on $(words ${EXTERNAL_PERL_PACKAGE_DEPS}) separately distributed Perl packages:)
+	$(info )
+	$(shell ${SCRIPT_DIR}/perlwhich -p -v -f ${EXTERNAL_PERL_PACKAGE_DEPS} 1>&2)
+	$(info )
+	$(info This project also requires the following $(words ${PERL_CORE_PACKAGE_DEPS}) packages)
+	$(info from the core Perl version ${PERL_VERSION} distribution itself:)
+	$(info )
+	$(shell ${SCRIPT_DIR}/perlwhich -p -v -f ${EXTERNAL_PERL_PACKAGE_DEPS} 1>&2)
+	$(info )
+	$(shell ${SCRIPT_DIR}/perlwhich -p -v -f ${PERL_CORE_PACKAGE_DEPS} 1>&2)
+	$(info )
+	$(info Perl version ${PERL_VERSION} is also required.)
+	$(info )
+
+ifndef EXTERNAL_PERL_PACKAGE_DEPS
+-include ${EXTDEPS_REQUIRED_MK}
+endif
+
+#ifdef EXTERNAL_PERL_PACKAGE_DEPS
+#$(info extdeps => $(shell perlwhich -missing-only ${EXTERNAL_PERL_PACKAGE_DEPS}))
+#endif 
 
 #
 # Dependencies of scripts and Perl modules on other Perl modules
@@ -158,7 +206,7 @@ endif # ! DEPS_AVAILABLE
 find_updated_modules = $(filter ${PERL_MODULES},${1})
 find_updated_scripts = $(filter ${PERL_SCRIPTS},${1})
 
-build/deps.mk: ${PERL_MODULES} ${PERL_SCRIPTS} build/modules.mk build/perl-scripts.mk build/perl-config.mk 
+build/deps.mk: ${PERL_MODULES} ${PERL_SCRIPTS} build/modules.mk build/perl-scripts.mk ${PERL_CONFIG_MK} 
 	$(eval UPDATED_MODULES := $(call find_updated_modules,$?))
 	$(eval UPDATED_SCRIPTS := $(call find_updated_scripts,$?))
 	$(if ${UPDATED_MODULES},$(call print_build,(status),$(words ${UPDATED_MODULES}) out-of-date Perl modules:${NL}$(call summarize_paths_across_lines,$(patsubst MTY/%,%,${UPDATED_MODULES}),${TAB}${TAB} - )))
@@ -172,15 +220,20 @@ build/deps.mk: ${PERL_MODULES} ${PERL_SCRIPTS} build/modules.mk build/perl-scrip
 endif # ! SKIP_MAKE_INCLUDES
 
 #
-# Module bundle generation (MTY::*::All):
+# Module bundle generation (MTY::*):
 #
 define generate_module_bundle_rule
-${1}/All.pm: ${1} | build
+${1}.pm: ${1}/ | build
 	$$(call print_build,Bundle,Updating module bundle $$@ for $$(words $$(filter ${1}/%,$${PERL_MODULES})) Perl modules)
-	@scripts/perl-mod-deps ${PERL_MOD_DEPS_QUIET} -bundle=$(subst /,::,${1})::All $$(filter ${1}/%,$${PERL_MODULES}) >& build/perl-mod-deps.bundle.$(subst /,-,${1}).log
+	@scripts/perl-mod-deps -bundle=$(subst /,::,${1}) $$(filter ${1}/%,$${PERL_MODULES}) >& build/perl-mod-deps.bundle.$(subst /,-,${1}).log
 endef # generate_module_bundle_rule
 
-$(foreach d,${PERL_MODULE_DIRS},$(eval $(call generate_module_bundle_rule,${d})))
+$(foreach d,${PERL_MODULE_BUNDLE_DIRS},$(eval $(call generate_module_bundle_rule,${d})))
+
+#scripts/colors.mk:
+#	@text-in-a-box -print $(foreach color,R G B C M Y K W U X,'${color} := %${color}') 'UX := %!U' >& $@
+
+# -include scripts/colors.mk
 
 #
 # Installation and synchronization with possibly updated installed modules
@@ -196,11 +249,11 @@ sync-modules: ${PERL_MODULES}
 	$(call print_build,SYNC,Synchronizing source tree with any newer Perl modules in ${PERL_SITELIB})
 	@cp -avu --parents -t ./ $(addprefix ${PERL_SITELIB}/,${PERL_MODULES})
 
-install-modules: ${PERL_MODULES} ${PERL_BUNDLE_MODULES}
+install-modules: ${PERL_MODULES} ${PERL_MODULE_BUNDLES}
 	$(call print_build,INSTALL,Installing $(words ${PERL_MODULES}) Perl modules into ${DESTDIR})
-	@${USE_SUDO} cp -avu --parents -t ${DESTDIR}/ ${PERL_MODULES} ${PERL_BUNDLE_MODULES}
+	@${USE_SUDO} cp -avu --parents -t ${DESTDIR}/ ${PERL_MODULES} ${PERL_MODULE_BUNDLES}
 
-test-install-modules: ${PERL_MODULES} ${PERL_BUNDLE_MODULES} build/modules.list
+test-install-modules: ${PERL_MODULES} ${PERL_MODULE_BUNDLES} build/modules.list
 	$(call print_build,TESTinst,(dry run) Installing $(words ${PERL_MODULES}) Perl modules into ${DESTDIR})
 	@rsync ${RSYNC_DRY_RUN_OPTIONS} MTY/ ${DESTDIR}/MTY/ | grep -v -P '/\Z' || true
 
@@ -237,11 +290,11 @@ info:
 #
 distclean:
 	$(call print_build,DISTCLEAN,Cleaning and removing temporary files prior to distribution)
-	@rm -f -v build/perl-config.mk build/perl-mod-deps*.log
+	@rm -f ${PERL_CONFIG_MK} ${EXTDEPS_CHECKED_MK} build/perl-mod-deps*.log
 
 clean:
 	$(call print_build,CLEAN,Cleaning and removing all generated files)
-	@rm -r -f -v build/ $(addsuffix /All.pm,${PERL_MODULE_DIRS}) $(wildcard MTY/*/All.pm) $(wildcard MTY/All.pm)
+	@rm -r -f build/ ${PERL_MODULE_BUNDLES} 
 
 commit:
 	git add -v .
@@ -250,4 +303,6 @@ commit:
 push:
 	git push origin master
 
-all: $(addsuffix /All.pm,${PERL_MODULE_DIRS}) build/modules.list build/perl-scripts.list 
+
+all: ${PERL_MODULE_BUNDLES} build/modules.list build/perl-scripts.list 
+

@@ -1,0 +1,243 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# Colorize gcc errors and warning messages
+# (inspired by colorgcc, but more straightforward and flexible)
+#
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
+#
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Display::Colorize;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::TextInABox;
+use MTY::Display::PrintableSymbolTools;
+use MTY::Display::PrintableSymbols;
+use MTY::RegExp::Define;
+use MTY::RegExp::Tools;
+use MTY::RegExp::Blocks;
+use MTY::RegExp::Numeric;
+use MTY::RegExp::FilesAndPaths;
+use MTY::RegExp::CxxREs;
+
+# Note: gcc now uses Unicode quotes if LANG=en_US.UTF-8, so use the UTF-8 encodings of these,
+# or simply disable UTF-8 to use regular "'" quotes:
+#$ENV{LANG} =~ s/\.UTF-8//g;
+
+$disabled = 0;
+
+# Get the terminal type. 
+$terminal = $ENV{TERM};
+$terminal = 'dumb' if (!$terminal);
+
+$settings = $ENV{'COLORIZE_GCC'} // 'max_error_lines=rows*0.7';
+
+if ($settings =~ /\b (nocolor|off|disable)/oamsx) {
+  $disabled = 1;
+}
+
+# If it's in the list of terminal types not to color, or if
+# we're writing to something that's not a tty, don't do color.
+if (! stderr_is_terminal() || ($terminal eq 'dumb') || $disabled) {
+  while (<STDIN>) {
+    printfd(STDERR, $_);
+  }
+  exit 0;
+}
+
+$rows = $ENV{'LINES'} // 50;
+$columns = $ENV{'COLUMNS'} // 120;
+
+if ($settings =~ /\bcolumns=(\d+)\b/oamsxg) { $columns = $1; }
+
+if ($settings =~ /\b max_error_lines (?: \= (\w+) (?: \* ([\d\.]+))?)? (?: \s | \Z)/oamsxg) {
+  my $limit = $1;
+  my $multiplier = $2;
+
+  if ($limit =~ /^inf/) { 
+    $max_error_lines = (1<<31); 
+  } elsif ($limit =~ /^(rows|lines|term)/oamsxig) {
+    $max_error_lines = $rows;
+  } else {
+    $max_error_lines = int($limit);
+  }
+
+  if (defined($multiplier)) { $max_error_lines = int($max_error_lines * $multiplier); }
+} else {
+  $max_error_lines = int(int($rows) * 0.7);
+}
+
+$message_source_syntax_re = qr/\'(.+?)\'/oax;
+
+$in_file_incl_from_line_col_message_re = 
+  qr/^(?: In \s file \s included \s)? \s*+ 
+     from \s ([^\:]++) 
+     (?> : (\d++))?
+     (?> : (\d++))? 
+     [\,\:]$/oax;
+
+$file_line_col_eow_message_re = 
+  qr/^ (\S+ \. \w+ | \<stdin\>) \:
+     (\d+) \: (\d+) \: \s* (\w+\:) \s* (.*)$/oax;
+
+$file_rest_re = qr/^(\S+ \. \w+): \s* (.*)$/oax;
+$message_template_params_re = qr/(\[with\s+$inside_square_brackets_re\])/oax;
+
+$printed_header_line = 0;
+
+$lines_printed_so_far = 0;
+$passed_max_error_lines = 0;
+
+my $out = '';
+
+sub print_header_line {
+  return if ($printed_header_line);
+  $out .= "${U}${B}" . (' ' x $columns) . "${X}${X}\n\n";
+  $printed_header_line = 1;
+}
+
+my $left_quote = left_quote;
+my $left_single_quote = left_single_quote;
+my $right_quote = right_quote;
+my $right_single_quote = right_single_quote;
+my $up_arrow_tri = up_arrow_tri;
+
+my $accum_text_in_a_box = '';
+
+sub check_and_print_accum_text() {
+  return if (is_empty($accum_text_in_a_box));
+  $out .= text_in_a_box($accum_text_in_a_box, -1, $R, 'rounded');
+  $accum_text_in_a_box = '';
+}
+
+my %cxx_token_types_to_highlighting_colors = (
+  CXX_TOKEN_WHITESPACE, $K,
+  CXX_TOKEN_COMMENT, $K,
+  CXX_TOKEN_QUOTED, $C,
+  CXX_TOKEN_NUMERIC, $M,
+  CXX_TOKEN_OPERATOR, $G,
+  CXX_TOKEN_IDENTIFIER, $Y.$U, # unless it's a keyword - regular identifiers are white
+  CXX_TOKEN_STRUCTURAL, $B,
+  CXX_TOKEN_PREPROCESSOR, $R);
+
+sub highlight_cxx_syntax($$) {
+  my ($token, $whitespace) = @_;
+  local $REGMARK = undef;
+
+  if ($token =~ /$cxx_token_re/oamsxg) {
+    my $type = $REGMARK;
+    # prints(STDERR "[tok=$token, type=".($type//'<?>')."]\n");
+    my $color = $cxx_token_types_to_highlighting_colors{$type} // $X;
+    if ($type == CXX_TOKEN_IDENTIFIER) {
+      $color = (exists $cxx_keywords{$token}) ? $W.$U : $Y;
+    }
+    return $color.$token.$X.$whitespace
+  } else {
+    return '???';
+  }
+}
+
+while (<STDIN>) {
+  chomp;
+  $out = '';
+  if (/$in_file_incl_from_line_col_message_re/oaxg) {
+    check_and_print_accum_text();
+    print_header_line();
+    $file = sprintf("%20s", $1);
+    $line = sprintf("%5s", $2 // '?');
+    $col = sprintf("%3s", $3 // '?');
+    $out .= $K.'In file included from '.$M.$file.$K.' @'.$Y.$line.$K.
+      ', '.$Y.$col.$K.':'.NL;
+  } elsif (/$file_line_col_eow_message_re/oaxg) {
+    check_and_print_accum_text();
+    print_header_line();
+    ($file, $line, $col, $type, $message) = ($1, $2, $3, $4, $5);
+    $is_error = ($type =~ /error:/oax);
+    $is_warning = ($type =~ /warning:/oax);
+    $is_note = ($type =~ /note:/oax);
+
+    $type =~ s{error:}
+              {${R}${U}ERROR:${X}${X}}oax;
+
+    $type =~ s{warning:}
+              {${Y}${U}WARNING:${X}${X}}oax;
+
+    $type =~ s{note:}
+              {${C}${U}note:${X}${X}}oax;
+
+    $message =~ s/$message_template_params_re/${M}$1${X}/oaxg;
+    my $REGMARK = undef;
+    $message =~ s/$cxx_token_re/highlight_cxx_syntax($1, $+{whitespace})/oaxge;
+    $message =~ s/$message_source_syntax_re/${K}${left_quote}${C}$1${K}${right_quote}${X}/oaxg;
+
+    my $sym = 
+      ($is_error) ? ' '.x_symbol.' ' : 
+      ($is_warning) ? ' '.warning_sign.' ' : 
+      ($is_note) ? ' '.asterisk.' ' :
+      '';
+    #$line = sprintf("%5s", $line);
+    #$col = sprintf("%3s", $col);
+    my $m = '';
+    $m .= $R.$sym.$type.$K.' in '.
+      $G.$file.$K.' @ '.$Y.$line.$K.', '.$Y.$col.$K.$X;
+    if (!$is_note) { $m .= NL; }
+    $m .= $B.' '.arrow_head.' '.$X.$message.NL;
+    (($is_note) ? $out : $accum_text_in_a_box) .= $m;
+    # $accum_text_in_a_box .= $B.' '.arrow_head.' '.$X.$message.NL;
+  } elsif (/$file_rest_re/oa) {
+    print_header_line();
+    ($file, $message) = ($1, $2);
+    $message =~ s/$message_source_syntax_re/${K}${left_quote}${G}1${K}${right_quote}${X}/oaxg;
+    $out .= $C.$file.': '.$Y.$message.$X.NL;
+  } elsif (/^\s*\^/oa) {
+    check_and_print_accum_text();
+    print_header_line();
+    s/\^/${B}${up_arrow_tri}${X}/oag;
+    $out .= "$_\n";
+  } else {
+    check_and_print_accum_text();
+    print_header_line();
+    #s/'\-D'/${K}'${R}-D${K}'${G}/oag;
+
+    s{\b(\w+\s*\=)}
+     {${M}$1${G}}oamsg;
+
+    s{[\s\']\K(\-[^D][^\s\']*)(?=[\s\'])}
+     {${Y}$1${G}}oamsgx;
+
+    s{[\s\']\K(\-D[^\s\']*)(?=[\s\'])}
+     {${M}$1${G}}oamsgx;
+
+    s{\'([^\']*)\'}
+     {${K}${left_single_quote}${C}$1${K}${right_single_quote}${X}}oamsg;
+
+    s{\"([^\"]*)\"}
+     {${K}${left_quote}${C}$1${K}${right_quote}${X}}oamsg;
+
+    #s{\'\K([^\']*)(?=\')}{${C}$1${K}}oamsg;
+    #s{\"([^\']*)\"}{${K}${left_quote}${C}$1${K}${right_quote}${G}}oamsg;
+    $out .= "$_\n"; #"${G}$_${X}\n";
+  }
+
+  my $lines = ($out =~ tr/\n//);
+
+  if (($lines_printed_so_far + $lines) < $max_error_lines) {
+    printfd(STDERR, $out);
+    $lines_printed_so_far += $lines;
+  } elsif (!$passed_max_error_lines) {
+    $passed_max_error_lines = 1;
+    my $starbar = $Y.' '.star.' '.star.' '.star.' ';
+    printfd(STDERR, $R.(' ' x 10).$starbar.$R.
+          "  Too many lines of errors and/or warnings ($lines_printed_so_far); suppressing remaining errors  ".
+          $Y.' '.$starbar.$R.(' ' x 10).$X."\n");
+  }
+}
+
+if ($lines_printed_so_far > 0) {
+  printfd(STDERR, "\n");
+}
+
+exit 0;

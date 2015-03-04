@@ -1,0 +1,71 @@
+#!/bin/bash
+
+SCRIPTNAME=setpaths
+PROJECT=mty-perl
+
+if [[ $0 =~ ${SCRIPTNAME} ]]; then
+  echo
+  echo "The ${SCRIPTNAME} script must be sourced into the current shell using:"
+  echo
+  echo "  . ${SCRIPTNAME}"
+  echo
+  echo "(It is not intended to be executed directly like a normal command)"
+  echo
+  exit 1
+fi
+
+case "$1" in
+  -u*|-r*|-x)
+    export MAKEFLAGS=$PREVIOUS_MAKEFLAGS
+    export PERLLIB=$PREVIOUS_PERLLIB
+    export PATH=$PREVIOUS_PATH
+    export PS1=$PREVIOUS_PS1
+    unset CURRENT_PROJECT PREVIOUS_MAKEFLAGS PREVIOUS_PERLLIB PERVIOUS_PATH PREVIOUS_PS1
+    echo
+    echo "Removed all ${PROJECT} build environment settings"
+    echo
+    return 0
+    ;;
+  *)
+esac
+
+if [[ $CURRENT_PROJECT == $PROJECT ]]; then
+  echo "(Current project is already $PROJECT)"
+  echo
+  return 2
+fi
+
+export CURRENT_PROJECT=$PROJECT
+
+export PREVIOUS_PATH=$PATH
+export PREVIOUS_PERLLIB=$PERLLIB
+export PREVIOUS_MAKEFLAGS=$MAKEFLAGS
+export PREVIOUS_PS1=$PS1
+
+export SOURCEDIR=$(realpath $PWD)
+export BUILDDIR=$SOURCEDIR/build
+
+[[ ! $PATH =~ ^$SOURCEDIR/scripts: ]] && export PATH=$SOURCEDIR/scripts:$PATH
+[[ ! $PERLLIB =~ ^${SOURCEDIR}: ]] && export PERLLIB=$SOURCEDIR:$PERLLIB >& /dev/null
+
+[ -n "$CPU_COUNT" ] || export CPU_COUNT=$(perlre '^processor\s*:' < /proc/cpuinfo | wc -l)
+export MAKEFLAGS="-r -R -j$CPU_COUNT $MAKEFLAGS"
+export MFLAGS=$MAKEFLAGS
+alias make='make $MAKEFLAGS'
+
+shopt -q -s globstar dotglob gnu_errfmt sourcepath xpg_echo
+shopt -q -u checkjobs
+
+export MTY_Display_ColorizeErrorsAndWarnings='abort_on_warnings=1'
+
+[[ -r scripts/colorize.sh ]] && . scripts/colorize.sh
+[[ ! $PS1 =~ \(${PROJECT}\) ]] && export PS1=${PS1/\\u/\\u ${B}(${PROJECT})}
+
+scripts/text-in-a-box -style=rounded -color=B \
+  "%G%{sym=checkmark} %YSet up your shell environment for %C%U${PROJECT}%!U%Y development:%X" \
+  "%{div=dashed}" \
+  "%B%{sym=dot} %YSource code directory: %M $SOURCEDIR%X" \
+  "%B%{sym=dot} %YBuild directory:       %M $BUILDDIR%X"
+echo ""
+
+export SHELL_ENV_OK_FOR_BUILD=$PWD

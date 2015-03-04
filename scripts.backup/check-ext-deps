@@ -1,0 +1,70 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+
+use version;
+use constant { NL => "\n" };
+
+my $package_and_version_re = qr{^ ([\w\:]++) (?> @ (.+))?}oax;
+
+my %required_package_to_version = map {
+  ($_ =~ $package_and_version_re) ? ($1 => ($2 // 0)) : 
+    die("Invalid package with optional version: '$_'");
+} @ARGV;
+
+my %found_packages = ( );
+my %missing_packages = ( );
+my %outdated_packages = ( );
+
+foreach my $package (sort keys %required_package_to_version) {
+  $@ = undef;
+  my $required_version = $required_package_to_version{$package} // 0;
+
+  my $ver = undef;
+  eval 'use '.$package.'; $ver = $'.$package.'::VERSION // 0;';
+
+  if (!defined $ver) { $missing_packages{$package} = $@; }
+  elsif (qv($ver) < qv($required_version)) { $outdated_packages{$package} = $ver; }
+  else { $found_packages{$package} = $ver; }
+}
+
+sub rename_for_make($) { return ($_[0] =~ s{::}{/}roaxg); }
+
+sub print_category($+) {
+  my ($label, $h) = @_;
+  return if (!scalar keys %$h);
+  print($label.' := '.join(' ', map { rename_for_make($_) } sort keys %$h).NL);
+}
+
+print_category('missing_perl_packages', %missing_packages);
+print_category('outdated_perl_packages', %outdated_packages);
+print_category('found_perl_packages', %found_packages);
+
+my %all_packages = (%found_packages, %outdated_packages);
+
+while (my ($p, $v) = each %all_packages) {
+  print('perl_package_version['.rename_for_make($p).'] := '.$v.NL);
+}
+
+if ((scalar keys %missing_packages) || (scalar keys %outdated_packages)) {
+  print('define missing_or_outdated_deps_warning :='.NL);
+  print(NL);
+  print('  This project depends on the following missing or outdated external Perl packages:'.NL);
+  print(NL);
+
+  foreach my $p (sort keys %missing_packages) { 
+    my $req_ver = $required_package_to_version{$p};
+    print('  Missing:   '.$p.((defined $req_ver) ? '  (need at least v'.$req_ver.')' : '').NL); 
+  }
+
+  foreach my $p (sort keys %outdated_packages) { 
+    my $req_ver = $required_package_to_version{$p};
+    my $old_ver = $outdated_packages{$p};
+
+    print('  Outdated:  '.$p.'  (v'.$old_ver.' is too old; need at least v'.$req_ver.')'.NL); 
+  }
+
+  print(NL);
+  print('endef'.NL);
+} else {
+  print("ALL_EXT_PERL_PACKAGE_DEPS_SATISFIED := 1".NL);
+}

@@ -1,0 +1,128 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# Auto-generate iSCSI target .conf files in /etc/tgt/conf.d 
+# based on all online LVM logical volumes on the machine.
+#
+# Copyright 2015 Matt T. Yourst <yourst@yourst.com>
+#
+
+use MTY::Common::Common;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Display::Colorize;
+
+my $do_update = 0;
+my $do_add = 0;
+my $do_remove = 0;
+my $use_the_force = 0;
+my $do_rebuild = 0;
+my @explicit_target_list = ();
+
+foreach $arg (@ARGV) {
+  if ($arg =~ /^-(?:update|sync|refresh)/oax) {
+    $do_update = 1;
+  } elsif ($arg =~ /^-(?:add|export|share)/oax) {
+    $do_add = 1;
+  } elsif ($arg =~ /^-(?:remove|del|rm|clear|unexport|unshare)/oax) {
+    $do_remove = 1;
+  } elsif ($arg =~ /^-f(orce)?/oax) {
+    $use_the_force = 1;
+  } elsif ($arg eq '-rebuild') {
+    $do_rebuild = 1;
+  } else {
+    push(@explicit_target_list, $arg);
+  }
+}
+
+#if (!($do_update || $do_add || $do_remove)) { $do_update = 1; }
+if (($do_update + $do_add + $do_remove) > 1) { die("Only one of -add, -update, -remove may be specified (or if none given, -update is the default"); }
+
+if ($do_rebuild) {
+  # First remove all of our auto-generated target .conf files:
+  prints($R.'Cleaning and removing existing .auto.conf files...');
+  $dummy = qx{find /etc/tgt/conf.d/ -name '*.auto.conf' -delete};
+  prints("done\n");
+  prints($dummy);
+}
+
+sub build_target_conf($$$;$$) {
+  my ($name, $type, $dev, $size, $uuid) = @_;
+  my $out = 
+    '<target '.$name.'>'."\n".
+    '  <'.$type.'-store '.$dev.'>'."\n".
+    '    # lun 0'."\n";
+  if (is_there($size)) { $out .= '    # Size: '.$size."\n"; }
+  $out .=
+    '    write-cache off'."\n".
+    '    # online no;    # (uncomment to prevent this LUN from being exported)'."\n".
+    '    # readonly yes;  # (uncomment to prevent remote initiators from writing to this LUN)'."\n".
+    '  </'.$type.'-store>'."\n".
+    '</target>'."\n\n";
+
+  if (is_there($uuid)) {
+    $target_conf .=
+      '<target lvm-uuid-'.$uuid.'>'."\backing".
+      '  '.$type.'-store '.$dev.' # (LUN 0)'."\n".
+        '</target>'."\n\n";
+  }
+  return $out;
+}
+
+$servername = read_file('/etc/servername');
+chomp $servername;
+
+prints($Y.$U.'Querying LVM logical volumes...');
+open(LVS, '/sbin/lvs --noheadings --nosuffix --nameprefixes -o name,vg_name,uuid,size|');
+prints($G.'done'.$X."\n");
+
+while (<LVS>) {
+  chomp;
+  if (my ($name, $vg, $uuid, $size) = /LV_NAME='(.+?)' .*? VG_NAME='(.+?)' .*? UUID='(.+?)' .*? SIZE='(.+?)'/oax) {
+    #prints("$vg / $name ($uuid)\n");
+    my $export_name = $servername.':'.$vg.'.'.$name;
+    my $dev = '/dev/'.$vg.'/'.$name;
+    $target_conf = build_target_conf($export_name, 'backing', $dev, $size, $uuid);
+    
+    my $conf_filename = '/etc/tgt/conf.d/'.$vg.'.'.$name.'.auto.conf';
+    my $conf_filename_to_display = ($conf_filename =~ s{^(/etc/tgt/conf.d/)(.+)$}{$K$1$C$2$X}roamsxg);
+    if ((-f $conf_filename) && (!$use_the_force)) {
+      # my $old_target_conf = read_file($conf_filename);
+      prints($K.'- '.$R.'Skipped '.$C.$conf_filename_to_display.$K.' (already exists and/or has been customized)'.$X."\n");
+    } else {
+      write_file($conf_filename, $target_conf);
+      prints($K.'- '.$G.'Created '.$C.$conf_filename_to_display.$K.$X."\n");
+    }
+  }
+}
+
+close(LVS);
+
+prints("\n");
+prints($Y.$U.'Querying SATA/SCSI/SAS drives...');
+open(SCSI, '/usr/bin/lsscsi -i |');
+prints($G.'done'.$X."\n");
+
+while (<SCSI>) {
+  chomp;
+  if (my ($busid, $dev, $wwn) = /^\[(\d+\:\d+\:\d+\:\d+)\]\s.*(\/dev\/\S+)\s+(\S+)$/oax) {
+    $busid =~ s/\:/\-/oamsxg;
+    if ((!is_there($wwn)) || ($wwn eq '-')) {
+      if ($dev =~ /^\/dev\/(\w+)/) { $dev_node = $1; }
+      $wwn = 'scsi-'.$busid.'-'.$dev_node;
+    }
+    $target_conf = build_target_conf($wwn, 'direct', $dev);
+    
+    my $conf_filename = '/etc/tgt/conf.d/'.$wwn.'.auto.conf';
+    my $conf_filename_to_display = ($conf_filename =~ s{^(/etc/tgt/conf.d/)(.+)$}{$K$1$C$2$X}roamsxg);
+    if ((-f $conf_filename) && (!$use_the_force)) {
+      # my $old_target_conf = read_file($conf_filename);
+      prints($K.'- '.$R.'Skipped '.$C.$conf_filename_to_display.$K.' (already exists and/or has been customized)'.$X."\n");
+    } else {
+      write_file($conf_filename, $target_conf);
+      prints($K.'- '.$G.'Created '.$C.$conf_filename_to_display.$K.$X."\n");
+    }
+  }
+}
+
+close(SCSI);

@@ -1,0 +1,45 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# shade-alternating-lines: color the background of every other line
+# read from stdin either darker or lighter than the default background
+# color to improve the readability of column oriented data streams
+#
+# Copyright 2003 - 2015 Matt T. Yourst <yourst@yourst.com>
+#
+
+use integer; use warnings;
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Common::CommandLine;
+use MTY::Display::Colorize;
+use MTY::Display::PrintableSymbolTools;
+
+no integer;
+my $scale = 0.667;
+my @base_color_rgb = (40, 12, 64);
+my $lighter_color_rgb = \@base_color_rgb;
+my $darker_color_rgb = scale_rgb(@base_color_rgb, $scale);
+
+my %command_line_options = (
+  'scale' => [ \$scale, OPTION_VALUE_REQUIRED, [qw(s contrast)] ],
+  'color' => [ \@base_color_rgb, OPTION_VALUE_REQUIRED, [qw(c base basecolor base-color)] ],
+  'lighter' => [ \@{$lighter_color_rgb}, OPTION_VALUE_REQUIRED, [qw(light l)] ],
+  'darker' => [ \@{$darker_color_rgb}, OPTION_VALUE_REQUIRED, [qw(dark d)] ]
+);
+
+parse_and_check_command_line(%command_line_options, @ARGV);
+
+my $lighter_color = bg_color_rgb($lighter_color_rgb);
+my $darker_color = bg_color_rgb($darker_color_rgb);
+use integer;
+
+while (<STDIN>) {
+  chomp;
+  my $linenum = $.;
+  my $color = (($linenum & 1) == 0) ? $lighter_color : $darker_color;
+  printfd(STDOUT, $color.' '.$_.' '.$X.NL);
+}

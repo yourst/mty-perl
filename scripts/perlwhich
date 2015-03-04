@@ -24,16 +24,19 @@ use MTY::Display::ColorizeErrorsAndWarnings;
 use MTY::Display::Colorize;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;
+use MTY::Display::StringFormats;
 use MTY::Display::Scrollable;
 use MTY::Display::TextInABox;
 use MTY::Display::Table;
 use MTY::Display::Tree;
+use MTY::Display::TreeBuilder;
 use MTY::RegExp::Define;
 use MTY::RegExp::Tools;
 use MTY::RegExp::Blocks;
 use MTY::RegExp::FilesAndPaths;
 use MTY::RegExp::Numeric;
 use MTY::RegExp::PerlSyntax;
+use MTY::Common::PerlSourceTools;
 use MTY::RegExp::Strings;
 use MTY::System::POSIX;
 
@@ -293,21 +296,7 @@ use constant {
   red_orange_fg => fg_color_rgb(255, 140, 0),
 };
 
-my $module_package_namespaces_re = qr{^((?: \w+ ::)*) (\w+)$}oax;
-
-sub format_module_package_name($;$$) {
-  my ($name, $color, $leading_namespaces_color) = @_;
-  $color //= Y;
-  $leading_namespaces_color //= $color;
-
-  return '' if (!defined $name);
-
-  my ($leading_namespaces, $final_package) = ($name =~ /$module_package_namespaces_re/oax);
-  $leading_namespaces =~ s{$double_colon_re}{$double_colon}oaxg;
-
-  my $double_colon = red_orange_fg.double_colon.$leading_namespaces_color;
-  return $leading_namespaces_color.$leading_namespaces.$color.$final_package.$X;
-}
+my $module_package_namespaces_re = qr{\A ((?: \w+ ::)*) (\w+) \Z}oax;
 
 sub get_module_prefix_short_name($) {
   my ($path) = @_;
@@ -320,7 +309,7 @@ sub get_module_prefix_short_name($) {
   my $short = undef;
 
   if (is_there($search_path) && $shorten_search_paths) { 
-    $search_path = normalize_trailing_slash($search_path); 
+    $search_path = normalize_and_add_trailing_slash($search_path); 
     $short = $search_path_to_short_name{$search_path};
   }
 
@@ -350,95 +339,15 @@ sub format_module_filename($;$) {
       : $search_path.$subdir.$basename.$suffix);
 }
 
-my @pod_chunk_level_to_label_format = (
-  $C,
-  $G,
-  $Y,
-  $M, 
-  # all other pod commands just continue the previous box
-);
-
-#-----------------------------------------------------------------------------
-# format_pod_chunk($text, $label, $level):
-#
-# Format the specified pod format documentation within a .pm file as a series
-# of folder tabs containing the respective text sections
-#-----------------------------------------------------------------------------
-sub format_pod_chunk($;$) {
-  my ($text, $label, $level) = @_;
-  if (!defined $text) { return undef; }
-  $level //= 0;
-  $text =~ s{^\s*+}{}oamsx;
-  $text =~ s{\s*+$}{}oamsx;
-
-  if (defined $label) {
-    my $alignment = ($level < 3) ? ALIGN_CENTER : ALIGN_LEFT;
-    my $flags = ($level > 1) ? TAB_ONE_LINE_OVERLAY_LABEL : 0;
-
-    return print_folder_tab($label, $pod_chunk_level_to_label_format[$level], $alignment, undef, undef, $flags)
-  } else { 
-    return $B.(dashed_horiz_bar_2_dashes x (get_terminal_width_in_columns() - 2)).NL;
-  }
-}
-
-if (0) {
-my $perl_syntax_highlighting_re = 
-  qr{(
-       (?: $perl_comment_re (*:COMMENT)) | 
-       (?: $perl_keywords_and_built_in_functions_re (*:KEYWORD)) |
-       (?: $perl_sigil_and_identifier_re (*:IDENT)) |
-       (?: $perl_quoted_string_re (*:STRING)) |
-       (?: [\`\~\!\@\#\$\%\^\&\-\+\=\|\\\;\:\,\<\.\>\/\?]++ (*:OP)) |
-       (?: [\{\}\(\)\[\]]++ (*:STRUCTURAL))
-     )}oamsx;
-}
-
-#-----------------------------------------------------------------------------
-# print_perl_module_source($code):
-#
-# Print the specified perl code with colorized syntax highlighting
-#-----------------------------------------------------------------------------
-sub print_perl_module_source($) {
-  local $outfd = open_scrollable_stream() // STDOUT;
-  printfd($outfd, $_[0]);
-  close($outfd);
+sub print_perl_module_source($;$) {
+  my ($code, $colorize) = @_;
+  $colorize //= stdout_is_terminal();
+  local $outfd = ($colorize) ? (open_scrollable_stream() // STDOUT) : STDOUT;
+  my $out = ($colorize) ? format_perl_module_source($code) : $code;
+  printfd($outfd, $out);
+  $outfd = undef;
+  # close($outfd);
   return 0;
-
-  my $out = '';
-
-  my $pod_chunk = undef;
-  my $pod_chunk_tab_label = undef;
-  
-  my $max_width = get_terminal_width_in_columns() - 6;
-  
-  foreach (split /\n/oax, $_[0]) {
-    if ((length $_) > $max_width) { $_ = substr($_, 0, $max_width); }
-    if (/^ = (head\d+) \s* (\N*) $/oax) {
-      my ($pod_chunk_type, $pod_chunk_label) = ($1, $2);
-      $out .= format_pod_chunk($pod_chunk, $pod_chunk_tab_label);
-      $pod_chunk_tab_label = 
-        ($pod_chunk_level_to_label_format[$pod_chunk_type] // $B).
-        $pod_chunk_label.$X.NL;
-      $pod_chunk = '';
-      # are we resuming the normal code?
-    } elsif (/^ =cut $/oax) {
-      $out .= format_pod_chunk($pod_chunk, $pod_chunk_tab_label);
-      $pod_chunk = undef;
-    } else {
-      if (defined $pod_chunk) {
-        $pod_chunk .= $K.$_.NL;
-      } else {
-        # normal perl code:
-        #s{($perl_keywords_and_built_in_functions_re)}{$W$1$G}oamsxg;
-        s{$perl_comment_re}{$K\#$1$X}oamsxg;
-        #$line =~ s{($perl_string_re)}{$C$1$X}oamsxg;
-        #$line =~ s{$perl_sigil_and_identifier_re}{$Y$1$X}oamsxg;
-        $out .= $G.$_.NL;
-      }
-    }
-  }
-
-  $out .= format_pod_chunk($pod_chunk, $pod_chunk_tab_label);
 }
 
 sub update_module_package_to_filename_cache($) {
@@ -488,7 +397,7 @@ sub build_filename_tree() {
     if ($n == 0) {
       push @$label, $K.'('.$R.'no package declarations!'.$K.')'.$X;
     } elsif ($n == 1) {
-      push @$label, format_module_package_name($packages->[0], $Y, $C);
+      push @$label, format_perl_package_name($packages->[0], $Y, $C);
     } else { # ($n > 1)
       push @$label, $K.'('.$C.(scalar @$packages).$B.' packages'.$K.')'.$X;
     }
@@ -499,7 +408,7 @@ sub build_filename_tree() {
       foreach my $package (@$packages) {
         push @$node, [[
           [ TREE_CMD_SYMBOL, red_orange_fg.p_in_circle.' ' ],
-          format_module_package_name($package, $Y, $C),
+          format_perl_package_name($package, $Y, $C),
         ]];
       }
     }
@@ -526,7 +435,7 @@ sub build_module_package_tree() {
     my $node = [
       [
         [ TREE_CMD_SYMBOL, red_orange_fg.p_in_circle ],
-        $Y.format_module_package_name($package, $Y).
+        $Y.format_perl_package_name($package, $Y).
           $K.' ('.$B.'declared in '.$C.(scalar @$filenames_comprising_package).
             $B.' .pm module files'.$K.'):'.$X,
       ],
@@ -560,7 +469,7 @@ sub build_namespace_tree() {
 
   my %containing_package_to_subpackage_count = ( );
   foreach my $package (@$packages) {
-    my ($outer, $inner) = ($package =~ /$module_package_namespaces_re/oax);
+    my ($outer, $inner) = ($package =~ /$perl_package_namespaces_re/oax);
     $outer =~ s{\:\: $}{}oax;
 
     if ((length $outer) > 0) {
@@ -585,7 +494,7 @@ sub build_namespace_tree() {
     my $package_name_dark_color = (($subpackage_count > 0) ? U : '').scale_rgb_fg($short_dir_prefix_color, RATIO_1_2);
 
     my $name = ($print_fully_qualified_namespace_in_tree || ($subpackage_count > 0))
-      ? format_module_package_name($package, $package_name_color, $package_name_dark_color) 
+      ? format_perl_package_name($package, $package_name_color, $package_name_dark_color) 
       : $package_name_color.$last_package_component;
 
     my @metadata = ( );
@@ -792,7 +701,7 @@ my %perl_config_dirs_to_short_names = (
 );
 
 %search_path_to_short_name = map { 
-  normalize_trailing_slash($perl_config{$_}) => $perl_config_dirs_to_short_names{$_} 
+  normalize_and_add_trailing_slash($perl_config{$_}) => $perl_config_dirs_to_short_names{$_} 
 } qw(privlib archlib vendorlib vendorarch sitelib sitearch perlpath);
 
 my $perl_libs_base_dir = (($perl_config{sitelib_stem} // '/usr/lib/perl5/site_perl') =~ s{/site_perl$}{}roax).'/';
@@ -833,13 +742,16 @@ foreach $arg (@$requested_modnames) {
     $args_contain_regexps = 1;
     my $mod = ($1 =~ s{::}{/}roaxg);
     $arg = qr{$mod}oaxi;
-print("arg = $arg\n");
+    # print("arg = $arg\n");
   }
 }
 
 my $files_searched_so_far = 0;
 
-my $pm_or_al_filename_re = qr{\. (?: pm|al) $}oax;
+my $pm_or_al_filename_re = qr{\.(?> pm|al) \Z}oamsx;
+
+# This may be overridden below if wildcards are used to search for package names:
+my $find_perl_module_files_re = qr{\A .+ $pm_or_al_filename_re};
 
 sub filter_pm_or_al_files {
   my $fullpath = $File::Find::name;

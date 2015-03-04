@@ -1,0 +1,455 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# find-packages-and-deps-in-cpan-dist
+#
+# Analyzes the source directories of CPAN distributions 
+# (such as a local mirror of the official CPAN archives)
+# to determine the packages declared by each distribution
+# and which packages and other distributions it depends on.
+#
+# This data can be printed in various formats, including 
+# makefile variable assignments, makefile targets, or as
+# a graphical tree format.
+#
+# This program is primarily intended to be invoked by the
+# CPAN local mirror Makefile in the mty-perl distribution.
+#
+# Copyright 2003-2015 Matt T. Yourst <yourst@yourst.com>
+#
+
+use MTY::Common::Common;
+use MTY::Common::Strings;
+use MTY::RegExp::PerlSyntax;
+use MTY::Filesystem::Files;
+use MTY::Filesystem::FileStats;
+use MTY::Common::CommandLine;
+use MTY::System::POSIX;
+
+use MTY::Display::PrintableSymbols;
+use MTY::Display::Colorize;
+use MTY::Display::Tree;
+use MTY::Display::Table;
+use MTY::Display::TextInABox;
+
+use MTY::RegExp::Strings;
+
+use Config;
+use Module::CoreList;
+use File::Find;
+
+#
+# Some CPAN sources push our Perl parsing regexps to their limits
+# and will trigger excessive recursion warnings in rare cases.
+# These cases have no impact on correctness, but they will abort
+# this program if they occur more than a few times, so this will
+# slap a muzzle on these spurious warnings:
+#
+no warnings qw(regexp);
+
+my $enable_warnings = 1;
+
+my $dist;
+my $source_dir;
+my $package_to_dist_index_dir;
+my $all_dists_in_dir;
+my $update_existing_deps;
+my $list_packages = 1;
+my $list_package_deps = 1;
+my $list_dist_deps = 1;
+my $list_unknown_packages = 1;
+my $separate_output_files_in_dir;
+my $show_progress = 1;
+my $debug = 0;
+
+my %command_line_options = (
+  'package-to-dist-symlinks-dir' => [ \$package_to_dist_index_dir, OPTION_VALUE_REQUIRED, [ 'm', 'p2d', 'map' ] ],
+  'all-dists-in-dir' => [ \$all_dists_in_dir, OPTION_VALUE_REQUIRED, [ 'a', 'all' ] ],
+  'update' => [ \$update_existing_deps, OPTION_VALUE_REQUIRED, [ 'u', 'up', 'update-deps' ] ],
+  'dist' => [ \$dist, OPTION_VALUE_REQUIRED, [ 'd' ] ],
+  'source' => [ \$source_dir, OPTION_VALUE_REQUIRED, [ 's' ] ],
+  'packages' => [ \$list_packages, 0, [ 'p' ] ],
+  'package-deps' => [ \$list_package_deps, 0, [ 'pd', 'pkgdeps' ] ],
+  'dist-deps' => [ \$list_dist_deps, 0, [ 'dd', 'distdeps' ] ],
+  'unknown-packages' => [ \$list_unknown_packages, 0, [ 'unk', 'unknown' ] ],
+  'output-files-in-dir' => [ \$separate_output_files_in_dir, OPTION_VALUE_REQUIRED, [ 'out', 'outdir', 'o' ] ],
+  'progress' => \$show_progress,
+  'verbose' => [ \$debug, 0, [ 'v' ], 1, 0 ],
+  'debug' => [ \$debug, 0, [ qw(vv v2) ], 2, 0 ],
+  META_OPTION_ONE_OR_MORE_REQUIRED, 1,
+);
+
+my ($extra_args, $invalid_args) = parse_and_check_command_line(%command_line_options);
+
+# Find all modules already distributed with Perl itself:
+my %core_modules = (map { ($_, 1) } (Module::CoreList->find_modules(qr{}oax)));
+
+my $perl_source_filenames_re = qr{\. (?: p[ml] | al) $}oamsx;
+my $perl_shebang_re = qr{\A \# \! \S*? perl}oamsx;
+
+sub format_package_name($;$$) {
+  my ($package, $color, $dark_color) = @_;
+  $color //= G;
+  $dark_color //= scale_rgb_fg($color, 0.5);
+
+  my $sep = $dark_color.double_colon.$color;
+  $package =~ s{::}{$sep}oamsxg;
+  return $color.$package;
+}
+
+sub format_dist_name($;$$) {
+  my ($dist, $color, $dark_color) = @_;
+  $color //= C;
+  $dark_color //= C_3_4;
+
+  my $sep = $dark_color.'-'.$color;
+  $dist =~ s{-}{$sep}oamsxg;
+  return $color.$dist;
+}
+
+sub find_packages_and_deps_in_perl_source($$++;+) {
+  my ($filename, $code, $packages_declared, $packages_used, $debug_tree_node) = @_;
+
+  my $current_package = undef;
+  my $primary_package = undef;
+
+  my %package_to_deps = ( );
+  my $current_package_deps = undef;
+  my %file_deps = ( );
+
+  while ($code =~ /$perl_package_decls_and_deps_re/oamsxg) {
+    my ($keyword, $package) = ($1, $2);
+    $keyword //= ''; $package //= '';
+
+    # skip package or use clauses within comments, strings, POD docs, etc.:
+    next if (!length $keyword); 
+
+    if ($keyword eq 'package') {
+      $packages_declared->{$package}++;
+      if (defined $debug_tree_node) {
+        push @$debug_tree_node, 
+          [ [ [ TREE_CMD_SYMBOL, G.p_in_circle ], G_2_3.'pkg  '.G.format_package_name($package, G, G_1_2) ] ];
+      }
+    } elsif ($keyword eq 'use' || $keyword eq 'require') {
+      $packages_used->{$package}++;
+      if (defined $debug_tree_node) {
+        push @$debug_tree_node, 
+          [ [ [ TREE_CMD_SYMBOL, Y.checkmark ], Y_2_3.'use  '.Y.format_package_name($package, Y, Y_1_2) ] ];
+      }
+    } elsif (($keyword eq 'pragma' && $package eq 'end_of_includes') ||
+              ($keyword eq '__END__') || ($keyword eq '__DATA__')) {
+      if (defined $debug_tree_node) {
+        push @$debug_tree_node, 
+          [ [ [ TREE_CMD_SYMBOL, R.x_signed ], R_2_3.'eoi  '.R.
+                ($keyword // '').' '.($package // '') ] ];
+      }
+      last;
+    }
+  }
+
+  return ($packages_declared, $packages_used);
+}
+
+my %package_to_dist = ( );
+
+sub package_to_dist($) {
+  my ($package) = @_;
+
+  if (exists $package_to_dist{$package}) 
+    { return $package_to_dist{$package}; }
+  die if (!defined $package_to_dist_index_dir);
+  
+  my $symlink = sys_readlink($package_to_dist_index_dir.'/'.$package);
+  my $dist = (defined $symlink) ? filename_of($symlink) : undef;
+
+  $package_to_dist{$package} = $dist;
+  return $dist;
+}
+
+my @filenames = ( );
+
+sub find_perl_sources {
+  my $fullpath = $File::Find::name;
+
+  return if (! -f $fullpath);
+
+  if ($fullpath =~ /$perl_source_filenames_re/oamsx) {
+    push @filenames, $fullpath;
+    return;
+  }
+
+  if (-x $fullpath) {
+    my $header = read_file($fullpath, undef, 256);
+    if ($header =~ /$perl_shebang_re/oamsx) {
+      push @filenames, $fullpath;
+      return;
+    }
+  }
+}
+
+sub find_packages_and_deps_in_cpan_dist($$) {
+  my ($dist, $source_dir) = @_;
+
+  my $debug_tree_node = undef;
+
+  if ($debug) {
+    $debug_tree_node = 
+      [ [ [ TREE_CMD_SYMBOL, C.dice_5_dots ], C.U.format_dist_name($dist) ] ];
+  }
+
+  @filenames = ( );
+  File::Find::find({wanted => \&find_perl_sources}, $source_dir);
+  
+  my %packages_declared = ( );
+  my %packages_used = ( );
+  my %dists_used = ( );
+  my %unknown_packages_used = ( );
+
+  my @debug_tree_file_nodes = ( );
+  
+  foreach my $filename (@filenames) {
+    my $code = read_file($filename);
+
+    my $debug_tree_file_node = undef;
+    if ($debug > 1) {
+      my $filename_stem = remove_from_start($filename, $source_dir.'/');
+      $debug_tree_file_node = 
+        [ [ [ TREE_CMD_SYMBOL, M.three_horiz_bars ], M_2_3.'file '.M.$filename_stem ] ];
+      push @debug_tree_file_nodes, $debug_tree_file_node;
+    }
+    find_packages_and_deps_in_perl_source($filename, $code, 
+      %packages_declared, %packages_used, $debug_tree_file_node);
+  }
+
+  my $packages_declared_list = [ sort keys %packages_declared ];
+  my $packages_used_list = [ sort keys %packages_used ];
+
+  @$packages_used_list = grep {
+    my $package = $_;
+    # skip any deps on packages declared within the same distribution,
+    # and also skip packages distributed with Perl itself:
+    my $include = (!((exists $packages_declared{$package}) || 
+                       (exists $core_modules{$package})));
+
+    if ($include) {
+      my $dist_used = package_to_dist($package);
+      if (defined $dist_used) { 
+        $dists_used{$dist_used}++; 
+      } else {
+        $unknown_packages_used{$package}++;
+      }
+    }
+
+    $include;
+  } @$packages_used_list;
+
+  my $dists_used_list = [ sort keys %dists_used ];
+  my $unknown_packages_used_list = [ sort keys %unknown_packages_used ];
+
+  if ($debug) {
+    my $debug_tree_decl_packages_node = [ [ G_2_3.U.'Declared Packages' ] ];
+    foreach my $pkg (@$packages_declared_list) {
+      push @$debug_tree_decl_packages_node,
+        [ [ [ TREE_CMD_SYMBOL, G_2_3.p_in_circle.' ' ], G.format_package_name($pkg, G, G_1_2) ] ];
+    }
+    push @$debug_tree_node, $debug_tree_decl_packages_node;
+
+    if (scalar @$packages_used_list) {
+      my $debug_tree_req_pkgs_node = [ [ Y_2_3.U.'Required Packages' ] ];
+      foreach my $pkg (@$packages_used_list) { 
+        my $dist_of_pkg = package_to_dist($pkg) // '???';
+        $in_dist_label = ($dist_of_pkg ne ($pkg =~ s{::}{-}roamsxg)) ?
+          (' '.C_1_2.'(in '.C_3_4.(package_to_dist($pkg) // '???').C_1_2.')') : '';
+
+        push @$debug_tree_req_pkgs_node,
+          [ [ [ TREE_CMD_SYMBOL, Y_2_3.checkmark_in_box.' ' ], 
+              Y.format_package_name($pkg, Y, Y_1_2).$in_dist_label ] ];
+      }
+      push @$debug_tree_node, $debug_tree_req_pkgs_node;
+    }
+
+    if (scalar @$dists_used_list) {
+      my $debug_tree_req_dists_node = [ [ C_2_3.U.'Required Distributions' ] ];
+      foreach my $reqdist (@$dists_used_list) { 
+        push @$debug_tree_req_dists_node,
+          [ [ [ TREE_CMD_SYMBOL, C_2_3.checkmark_in_box.' ' ], C.format_dist_name($reqdist) ] ];
+      }
+      push @$debug_tree_node, $debug_tree_req_dists_node;
+    }
+
+    if (scalar @$unknown_packages_used_list) {
+      my $debug_tree_unknown_packages_node = [ [ ORANGE_2_3.U.'Required Packages from Unknown Distributions' ] ];
+      foreach my $reqpkg (@$unknown_packages_used_list) {
+        push @$debug_tree_unknown_packages_node,
+          [ [ [ TREE_CMD_SYMBOL, ORANGE_2_3.warning_sign.' ' ], ORANGE.$reqpkg ] ];
+      }
+      push @$debug_tree_node, $debug_tree_unknown_packages_node;
+    }
+
+    if ($debug > 1) { push @$debug_tree_node, @debug_tree_file_nodes; }
+
+    prints(print_folder_tab(format_dist_name($dist)));
+    print_tree($debug_tree_node);
+    prints(NL);
+  }
+
+  return (
+    $packages_declared_list,
+    $packages_used_list,
+    $dists_used_list,
+    $unknown_packages_used_list,
+  );
+}
+
+sub format_info($$+;+++) {
+  my ($dist, $packages, $pkgdeps, $distdeps, $unknowndeps) = @_;
+
+  my $out = '';
+  $out .= 'packages['.$dist.'] := '.join(' ', @$packages).NL if ((defined $packages) && ($list_packages));
+  $out .= 'pkgdeps['.$dist.'] := '.join(' ', @$pkgdeps).NL if ((defined $pkgdeps) && (scalar @$pkgdeps) && ($list_package_deps));
+  $out .= 'distdeps['.$dist.'] := '.join(' ', @$distdeps).NL if ((defined $distdeps) && (scalar @$distdeps) && ($list_dist_deps));
+  $out .= 'unknowndeps['.$dist.'] := '.join(' ', @$unknowndeps).NL if ((defined $unknowndeps) && (scalar @$unknowndeps) && ($list_unknown_packages));
+  # $out .= NL if (length $out);
+  return $out;
+}
+
+my %packages_declared_by_dist = ( );
+my %packages_used_by_dist = ( );
+my %dists_used_by_dist = ( );
+my %unknown_packages_used_by_dist = ( );
+my %dist_deps_updated = ( );
+
+my %dep_type_to_hash = (
+  packages => \%packages_declared_by_dist,
+  pkgdeps => \%packages_used_by_dist,
+  distdeps => \%dists_used_by_dist,
+  unknowndeps => \%unknown_packages_used_by_dist,
+);
+
+my $dep_file_line_re = 
+  qr{^ \s*+ (\w++) \[ ([^\[\]]++) \] \s*+ :=
+     $line_with_optional_backslash_newlines_re
+  }oamsx;
+
+sub read_existing_deps($) {
+  my ($filename) = @_;
+
+  my $mtime = get_mtime_of_path($filename);
+
+  if (!defined $mtime) {
+    # Existing file does not exist or cannot be read
+    return undef;
+  }
+
+  my $data = read_file($filename);
+  die if (!defined $data);
+
+  while ($data =~ /$dep_file_line_re/oamsxg) {
+    my ($type, $dist, $list) = ($1, $2, $3);
+    $list = [ split(/\s+/oax, join_backslash_newline_escaped_lines($list)) ];
+    my $hash = $dep_type_to_hash{$type};
+    if (!defined $hash) {
+      printfd(STDERR, 'Warning: '.$filename.' contains unknown data type "'.$type.'" (ignored)'.NL);
+      next;
+    }
+    $hash->{$dist} = $list;
+  }
+
+  return $mtime;
+}
+
+my $existing_deps_timestamp = 0;
+
+if (defined $update_existing_deps) {
+  $existing_deps_timestamp = read_existing_deps($update_existing_deps) // 0;
+}
+
+if (defined $all_dists_in_dir) {
+  my $dists = read_directory($all_dists_in_dir);
+  die if (!defined $dists);
+  my $dists_processed = 0;
+  my $total_dists = scalar(@$dists);
+
+  foreach my $dist (@$dists) {
+    if ($show_progress) {
+      if (($dists_processed & 0x7f) == 0) {
+        no integer;
+        my $percent = ($dists_processed / $total_dists) * 100.0;
+        use integer;
+        printfd(STDERR, CR.'Processed '.$dists_processed.' out of '.$total_dists.
+                  ' distributions: '.sprintf('%3.0f', $percent).'% complete');
+      }
+    }
+
+    my $dir = $all_dists_in_dir.'/'.$dist;
+    next if ($dist =~ /\./oamsx); # skip ., .., .*
+
+    my $dist_dir_stats = get_file_stats($dir);
+    if (!defined $dist_dir_stats) 
+      { printfd(STDERR, 'Warning: cannot read directory '.$dir.'; skipping'.NL); next; }
+
+    next if (!is_file_type($dist_dir_stats, FILE_TYPE_DIR));
+
+    if ($existing_deps_timestamp >= $dist_dir_stats->[STAT_MTIME_NS]) {
+      $skipped_because_already_up_to_date++;
+      if ($debug) { printfd(STDERR, CR.$dist.' skipped because dependencies are already up-to-date'.NL); }
+      next;
+    }
+
+    my ($packages, $pkgdeps, $distdeps, $unknowndeps) = 
+      find_packages_and_deps_in_cpan_dist($dist, $dir);
+
+    $packages_declared_by_dist{$dist} = $packages;
+    $packages_used_by_dist{$dist} = $pkgdeps;
+    $dists_used_by_dist{$dist} = $distdeps;
+    $unknown_packages_used_by_dist{$dist} = $unknowndeps;
+    $dist_deps_updated{$dist} = 1;
+
+    $dists_processed++;
+  }
+
+  if ($show_progress) {
+    printfd(STDERR, CR, 'Processed all ', $total_dists, ' distributions successfully!', (' ' x 20), NL);
+    if ($skipped_because_already_up_to_date > 0) { 
+      printfd(STDERR, '(Skipped ', $skipped_because_already_up_to_date, 
+      ' distributions whose dependencies were already up to date)', NL);
+    }
+  }
+
+  if ($show_progress) { printfd(STDERR, 'Writing dependencies for ', $total_dists, ' distributions...'); }
+
+  if (!$debug) {
+    my $outfd;
+    if ($update_existing_deps) {
+      open($outfd, '>', $update_existing_deps) || die("Cannot open '$update_existing_deps' for writing");
+    } else {
+      $outfd = STDOUT;
+    }
+      
+    foreach my $dist (sort keys %packages_declared_by_dist) {
+      my ($packages, $pkgdeps, $distdeps, $unknowndeps) = 
+        ($packages_declared_by_dist{$dist},
+         $packages_used_by_dist{$dist},
+         $dists_used_by_dist{$dist},
+         $unknown_packages_used_by_dist{$dist});
+
+      my $info = format_info($dist, $packages, $pkgdeps, $distdeps, $unknowndeps);
+      
+      if (defined $separate_output_files_in_dir) {
+        if (exists $dist_deps_updated{$dist})
+          { write_file($separate_output_files_in_dir.'/'.$dist, $info); }
+      } else {
+        print($outfd $info);
+      }
+    }
+
+    if ($update_existing_deps) { close($outfd); }
+  }
+} else {
+  my ($packages, $pkgdeps, $distdeps, $unknowndeps) = 
+    find_packages_and_deps_in_cpan_dist($dist, $source_dir);
+
+  my $info = format_info($dist, $packages, $pkgdeps, $distdeps, $unknowndeps);
+  prints($info) if (!$debug);
+}
+

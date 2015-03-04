@@ -24,10 +24,16 @@ use MTY::Common::Strings;
 use MTY::Common::CommandLine;
 use MTY::Common::Misc;
 use MTY::Filesystem::Files;
+use MTY::Filesystem::SearchableDirList;
 use MTY::Display::Colorize;
+use MTY::Display::ColorCapabilityCheck;
 use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::PrintableSymbols;
+use MTY::Display::PrintableSymbolTools;
+# use MTY::Display::StringFormats;
 use MTY::Display::Table;
 use MTY::RegExp::PerlSyntax;
+use MTY::Common::PerlSourceTools;
 use MTY::RegExp::Tools;
 use MTY::RegExp::Strings;
 use MTY::RegExp::Blocks;
@@ -35,33 +41,49 @@ use MTY::RegExp::PerlSyntax;
 use MTY::RegExp::Numeric;
 
 my @specified_sub_names;
-my $show_prototypes = undef;
-my $show_attributes = undef;
-my $show_filenames = undef;
-my $show_lines = undef;
-my $show_offsets = 0;
-my $show_packages = 0;
-my $show_code = 0;
-my $verbose = 0;
+my $remove_subs = 0;
 my $show_as_table = 1;
 my $sort_by_name = 0;
-my $remove_subs = 0;
 my $show_anonymous_subs = 0;
+my $colorize_code //= undef;
+my $show_token_boundaries = 0;
+my $output_separator = NL;
+
+my $show_names = undef;
+my $show_prototypes = undef;
+my $show_attributes = undef;
+my $show_return_types = undef;
+my $show_filenames = undef;
+my $show_lines = undef;
+my $show_args = undef;
+my $show_offsets = 0;
+my $show_packages = 0;
+my $show_code = undef;
+my $include_comments_above_subs = 0;
+my $verbose = 0;
 
 my %command_line_options = (
   'sub' => [ \@specified_sub_names, OPTION_VALUE_REQUIRED|OPTION_APPEND_REPEATS|OPTION_COMMA_SEP_LISTS, [ qw(s print-sub) ] ],
+  'remove' => [ \$remove_subs, 0, [ qw(r d delete without strip) ] ],
+  'table' => [ \$show_as_table, 0, [ qw(t) ] ],
+  'sort' => [ \$sort_by_name, 0, [ qw(S sort-by-name) ] ],
+  'anon' => [ \$show_anonymous_subs, 0, [ qw(anonymous anon-subs) ] ],
+  'colorize' => [ \$colorize_code, 0, [ qw(pretty-print pretty pp colorize-code syntax-highlight) ] ],
+  'tokens' => [ \$show_token_boundaries, 0, [ qw(show-tokens show-token-boundaries) ] ],
+  'sep' => [ \$output_separator, OPTION_VALUE_REQUIRED, [ qw(separator output-separator) ] ],
+
+  'names' => [ \$show_names, 0, [ qw(n sub-names functions funcs) ] ],
   'protos' => [ \$show_prototypes, 0, [ qw(p proto prototypes) ] ],
   'attrs' => [ \$show_attributes, 0, [ qw(a attr attributes) ] ],
+  'returns' => [ \$show_return_types, 0, [ qw(ret rt z rets rettypes return-types) ] ],
   'filenames' => [ \$show_filenames, 0, [ qw(f files) ] ],
   'lines' => [ \$show_lines, 0, [ qw(l) ] ],
-  'offsets' => [ \$show_offsets, 0, [ ] ],
+  'offsets' => [ \$show_offsets, 0, [ qw(o) ] ],
   'packages' => [ \$show_packages, 0, [ qw(q qualified-names packages pkg modules mods) ] ],
+  'args' => [ \$show_argument_names, 0, [ qw(g arguments argument-names arg-names parameters params) ] ],
   'code' => [ \$show_code, 0, [ qw(c b body source) ] ],
+  'comments' => [ \$include_comments_above_subs, 0, [ qw(m comments-above-subs sub-comments) ] ],
   'verbose' => [ \$verbose, 0, [ qw(v) ] ],
-  'table' => [ \$show_as_table, 0, [ qw(t) ] ],
-  'sort' => [ \$sort_by_name, 0, [ qw(S n sort-by-name) ] ],
-  'remove' => [ \$remove_subs, 0, [ qw(r d delete without strip) ] ],
-  'anon' => [ \$show_anonymous_subs, 0, [ qw(anonymous anon-subs) ] ],
   META_OPTION_NON_OPTIONS_REQUIRED, 1,
 );
 
@@ -69,52 +91,71 @@ my @command_line_options_help = (
   [ OPTION_HELP_BANNER ] => 'Show subroutines in Perl source code or remove specified subs',
 
   [ OPTION_HELP_CATEGORY, Y_2_3, ] => Y.'General Options',
-  'sub' => 'Print the declarations and bodies of the specified subroutine(s) or them remove if -remove is given',
-  'remove' => 'Print the full contents of the specified files *except* for the specified subroutines',
-  'table' => 'Show the selected fields as a color coded table instead of simple text output',
-  'sort' => 'Sort the subroutines within each file by their names',
-  'anon' => 'Include anonymous subroutines',
-
+  'sub' => 'Print the declarations and bodies of the ^specified subroutine(s)^ or them remove if -remove is given',
+  'remove' => 'Print the full contents of the specified files ^~except~^ for the specified subroutines',
+  'table' => 'Show the selected fields in a ^table^ instead of simple text output',
+  'sort' => 'Sort the subroutines within each file ^by their names^',
+  'anon' => 'Include ^anonymous^ subroutines (^blocks, closures, lambdas,^ etc)',
+  'colorize' => '^Colorize^ and add ^syntax highlighting^ to displayed code for selected subroutines',
+  'tokens' => 'Show boundaries between parsed ^tokens^',
+  'sep' => 'Print specified text (instead of \n) after printing the metadata for each subroutine',
   [ OPTION_HELP_CATEGORY, G_2_3 ] => G.'Fields to Display',
-  'protos' => 'Show prototypes (if present) of the listed subroutines',
-  'attrs' => 'Show attributes (if present) of the listed subroutines',
-  'filenames' => 'Show which source file defines each listed subroutine',
-  'lines' => 'Show the line and column in each source file where each subroutine is defined',
-  'offsets' => 'Show the byte offset in each source file where each subroutine is defined',
-  'packages' => 'Show fully qualified subroutine names including the package name',
-  'code' => 'Show the code within the body of each subroutine',
+  'names' => 'Show ^names^ of subroutines',
+  'protos' => 'Show ^prototypes^ (if present) of the listed subroutines',
+  'attrs' => 'Show ^attributes^ (if present) of the listed subroutines',
+  'returns' => 'Show ^returned data types^ (if they can be determined) of the listed subroutines',
+  'filenames' => 'Show which ^source filename^ defines each listed subroutine',
+  'lines' => 'Show the ^line and column^ in each source file where each subroutine is defined',
+  'offsets' => 'Show the ^character offset^ in each source file where each subroutine is defined',
+  'packages' => 'Show ^fully qualified^ subroutine names including the ^package name'.X,
+  'args' => 'Show names of subroutine ^arguments^ (if found in usual "my ($arg1, ...) = @_" format',
   [ OPTION_HELP_SPACER ] => '',
-  'verbose' => 'Show all of the information above (except for the code) for each subroutine',
+  'verbose' => 'Show ^all of the above^ (-protos -attrs -returns -filenames -lines -offsets -packages)',
+  [ OPTION_HELP_SPACER ] => '',
+  'code' => 'Show the ^source code^ within the body of each subroutine',
+  'comments' => 'Show (or remove) any ^comments and/or POD documentation^ directly above each subroutine',
 );
 
 my ($filenames, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
 my %specified_sub_names = (map { $_ => 1 } @specified_sub_names);
 
-my $sn = ((scalar @specified_sub_names) || $verbose || $show_code) ? 1 : 0;
+$colorize_code //= 1 if ($show_code && is_stdout_color_capable());
+$show_code //= 1 if ($colorize_code);
 
+$show_as_table = 0 if ($show_code || $include_comments_above_subs);
+
+my $sn = bool (((scalar @specified_sub_names) || $verbose || 
+  $include_comments_above_subs || $show_code || $show_as_table) && 
+  (!any_defined $show_names, $show_prototypes, $show_attributes,
+   $show_filenames, $show_lines, $show_argument_names));
+
+$show_names //= $sn;
 $show_prototypes //= $sn;
 $show_attributes //= $sn;
-$show_filenames //= (!$show_code) && ($sn || ((scalar @$filenames) > 1));
+# $show_return_types //= $sn;
+$show_filenames //= (!$show_code) && $sn && ((scalar @$filenames) > 1);
 $show_lines //= (!$show_code) && $sn;
-
-$show_as_table = 0 if ($show_code || (!($show_prototypes || $show_attributes || $show_filenames || $show_lines)));
-
-my $perl_subs_ignore_non_code_re = 
-  qr{(?|
-       (?> ( ) (?> $strip_non_functional_perl_syntax_re)) |
-       $perl_package_decl_re |
-       $perl_sub_decl_and_body_re
-     )}oamsx;
+$show_argument_names //= $sn;
 
 my %filename_to_subs;
 my %sub_to_info;
 
 my $anonymous_sub_counter = 0;
 
-foreach my $filename (@$filenames) {
-  my $subs_in_file = [ ];
+foreach my $filename_or_package (@$filenames) {
+  my $filename = undef;
 
-  if ($filename eq '-') { $filename = '/dev/stdin'; }
+  if ($filename_or_package eq '-') 
+    { $filename = '/dev/stdin'; }
+  elsif (($filename_or_package =~ /\A $perl_package_name_re \Z/oamsx) 
+  && (!path_exists($filename_or_package))) { 
+    $filename = find_perl_module($filename_or_package);
+    if (!defined $filename) {
+      warning('Cannot find Perl module .pm file for package "'.$filename_or_package.'"');
+      next;
+    }
+    prints($filename, ' (package ', $filename_or_package, ')'.NL);
+  } else { $filename = $filename_or_package; }
 
   my $code = read_file($filename);
 
@@ -124,76 +165,60 @@ foreach my $filename (@$filenames) {
   }
 
   if ($remove_subs) {
-    $code =~ s{($perl_subs_ignore_non_code_re)}{
-      my ($match, $keyword, $name) = ($1, $2, $3);
-      my $keep = 
-        (!length $keyword) || # pass through all comments, strings, etc.
-        ($keyword eq 'package'); # pass through package declarations
-
-      my $remove_sub =
-        ($keyword eq 'sub') && (length $name) &&
-        ((!scalar @specified_sub_names) ||
-         (exists $specified_sub_names{$name}));
-
-      printfd(STDERR, 'keyword=[', $keyword, '], name=[', $name, ']: k ', ($keep?1:0), ', r ', ($remove_sub?1:0), NL);
-      ((!$keep) && ($remove_sub)) ? '<removed>' : $match;
-    }oamsxge;
+    $code = remove_perl_subs(
+      $code, ((@specified_sub_names) ? @specified_sub_names : undef));
 
     print('# '.$filename.NL) if ((scalar @$filenames) > 1);
     print($code);
-    next;
-  }
+  } else {
+    my $parts_to_extract = cond_or
+      $show_code => EXTRACT_PERL_SUB_CODE,
+      $show_lines => EXTRACT_PERL_SUB_LINE_NUMBERS,
+      $include_comments_above_subs => EXTRACT_PERL_SUB_COMMENTS_AND_POD_DOCS,
+      $show_argument_names => EXTRACT_PERL_SUB_ARG_NAMES,
+      $show_return_types => EXTRACT_PERL_SUB_RETURN_TYPES,
+      $show_anonymous_subs => EXTRACT_PERL_SUB_INCLUDING_ANONYMOUS_SUBS;
+      
+    my $subs_in_file = parse_perl_source_and_extract_subs(
+      $code, $parts_to_extract, \$anonymous_sub_counter);
 
-  my $line_to_offset_map = ($show_lines) 
-    ? create_line_offset_map($code) : undef;
-
-  my $package = 'main';
-
-  while ($code =~ /$perl_subs_ignore_non_code_re/oamsxg) {
-    my ($keyword, $name, $proto, $attrs, $body) = ($1, $2, $3, $4 // '', $5 // '');
-
-    next if (!length $keyword);
-
-    if ($keyword eq 'package') { $package = $name; next; }
-
-    my $offset = $-[0];
-
-    if (!length $name) {
-      next if (!$show_anonymous_subs);
-      $name = 'anonymous_sub_'.$anonymous_sub_counter++;
+    $filename_to_subs{$filename} = $subs_in_file;
+    foreach my $info (@$subs_in_file) { 
+      $sub_to_info{$info->{name}} = $info; 
     }
-
-    my ($line, $col) = (defined $line_to_offset_map) 
-      ? find_line_containing_offset($code, $offset, $line_to_offset_map) : ( );
-
-    my $info = [ $name, $proto, $attrs, $body, $package, $filename, $offset, $line // 0, $col // 0 ];
-    push @$subs_in_file, $info;
-    $sub_to_info{$name} = $info;
   }
-
-  $filename_to_subs{$filename} = $subs_in_file;
 }
 
 my @table = ( );
 
+sub truncate_string_with_elipsis($;$$) {
+  my ($s, $limit, $elipsis) = @_;
+  $limit //= get_terminal_width_in_columns();
+  $elipsis //= (stdout_is_terminal()) ? elipsis_three_dots : '...';
+  my $over = (length $s) - ($limit - printed_length($elipsis));
+  return $s if ($over <= 0);
+  return (substr($s, 0, $limit).$elipsis);
+}
+
 while (my ($filename, $subs) = each %filename_to_subs) {
   if ($sort_by_name) 
-    { $subs = [ sort { $a->[0] cmp $b->[0] } @$subs ]; }
+    { $subs = [ sort { $a->{name} cmp $b->{name} } @$subs ]; }
 
   foreach my $info (@$subs) {
-    my ($name, $proto, $attrs, $body, $package, $filename, $offset, $line, $col) = @$info;
+    my ($name, $proto, $attrs, $return_types, $arg_names, 
+        $body, $comments, $package, $filename, $offset, $line, $col) = 
+          getfields $info, qw(name proto attrs returns args code comments 
+                              package filename offset line column);
 
     next if ((@specified_sub_names) && (!exists $specified_sub_names{$name}));
 
     if ($show_as_table) {
-      my @row = ( $name );
+      my @row = ( );
+      push @row, $name if ($show_names);
       push @row, ((defined $proto) ? '('.$proto.')' : '') if ($show_prototypes);
-
-      if ($show_attributes) {
-        my @attrs = split(/[\s\:]++/, $attrs);
-        push @row, join('', map { ' :'.$_ } @attrs);
-      }
-
+      push @row, ((defined $arg_names) ? '('.join(', ', @$arg_names).')' : '') if ($show_argument_names);
+      push @row, join('', map { ' :'.$_ } @$attrs) if ($show_attributes);
+      push @row, join(' | ', @$return_types) if ($show_return_types);
       push @row, $package if ($show_packages);
       push @row, $filename if ($show_filenames);
       push @row, $line if ($show_lines);
@@ -202,16 +227,14 @@ while (my ($filename, $subs) = each %filename_to_subs) {
     } else {
       my $out = '';
 
+      $out .= $comments if ($include_comments_above_subs);
       $out .= 'sub ' if ($show_code);
       $out .= $package.'::' if ($show_packages);
-      $out .= $name;
+      $out .= $name if ($show_names);
       $out .= ' ' if ($show_prototypes && (defined $proto) && !$show_code);
-      $out .= '('.$proto.')' if ($show_prototypes && (defined $proto));
+      $out .= '('.truncate_string_with_elipsis($proto, 20).')' if ($show_prototypes && (defined $proto));
       
-      if ($show_attributes) {
-        my @attrs = split(/[\s\:]++/, $attrs);
-        $out .= join('', map { ' :'.$_ } @attrs);
-      }
+      if ($show_attributes) { $out .= join('', map { ' :'.$_ } @$attrs); }
       
       $out .= ' {' if ($show_code);
       if ($show_filenames || $show_lines || $show_offsets) {
@@ -224,9 +247,18 @@ while (my ($filename, $subs) = each %filename_to_subs) {
       $out .= $body.'}'.NL if ($show_code);
       $out .= NL;
       
+      if ($colorize_code) 
+        { $out = format_perl_module_source($out, undef, $show_token_boundaries); }
+
       prints($out);
     }
   }
 }
 
-if ($show_as_table) { print_table(STDOUT, @table, colseps => '  '); }
+if ($show_as_table) { 
+  my @lines = format_table(@table, colseps => '  ',
+    row_suffix => '', return_lines => 1); 
+  prints(join($output_separator, @lines));
+}
+
+exit 0;

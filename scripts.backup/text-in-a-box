@@ -1,0 +1,271 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# Text in a Box: present multi-line text strings within colorful boxes 
+# made from ANSI line drawing characters
+#
+# Copyright 2004-2015 Matt T. Yourst <yourst@yourst.com>. All rights reserved.
+#
+
+use integer; use warnings;
+
+use MTY::Common::Common;
+use MTY::Common::Hashes;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Common::CommandLine;
+use MTY::Display::TextInABox;
+use MTY::Display::Colorize;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::PrintableSymbolTools;
+use MTY::Display::PrintableSymbols;
+use MTY::Display::Scrollable;
+use MTY::RegExp::Define;
+use MTY::RegExp::Tools;
+use MTY::RegExp::Blocks;
+use MTY::RegExp::Numeric;
+
+my $text = '';
+my $alignment = -1;
+my $boxcolor = undef;
+my $style = 'single';
+my $divstyle = undef;
+my $left_space = undef;
+my $right_space = undef;
+my $width = undef;
+my $invisible_box = 0;
+my $banner_mode = 0;
+my $tab_mode = 0;
+my $div_mode = 0;
+my $straight_bottom_edges = TAB_STRAIGHT_BOTTOM_EDGES;
+my $straight_edged_tab = 0;
+my $clear_screen_first = 0;
+
+my $args_are_now_text = 0;
+my $show_help = (scalar @ARGV) == 0;
+
+my %alignment_name_to_code = (
+  'left' => -1,
+  'center' => 0,
+  'right' => +1,
+  'middle' => 0,
+  'justified' => -1,
+  'l' => -1,
+  'c' => 0,
+  'r' => +1,
+  'j' => -1
+);
+
+my %command_line_options = (
+  'print' => [ 
+    sub {
+      $invisible_box = 1;
+      $style = 'none';
+      $left_space //= '';
+    }, 0, [qw(p text nobox invisible)] ],
+  'clear-screen' => [ \$clear_screen_first, 0, 'clear' ],
+  'style' => [ \$style, OPTION_VALUE_REQUIRED, 's' ],
+  'divstyle' => [ \$divstyle, OPTION_VALUE_REQUIRED, 'ds' ],
+  'align' => [ 
+    sub {
+      $alignment = $alignment_name_to_code{$_[0]};
+      if (!defined $alignment) { 
+        warn('Alignment type '.format_quoted($_[0]).' is invalid'); 
+        return INVALID_OPTION;
+      }
+    }, OPTION_VALUE_OPTIONAL, 'a' ],
+  'color' => [
+    sub {
+      $boxcolor = '';
+      foreach my $shortname (split //oax, $_[0]) {
+        my $codes = $color_markup_to_code_map{$shortname};
+        if (!defined($codes)) { 
+          warn("Invalid color or formatting code: '$shortname'\n"); 
+          return INVALID_OPTION;
+        }
+        $boxcolor .= $codes;
+      }
+    }, OPTION_VALUE_REQUIRED, 'c' ],
+  'leftspace' => [ \$left_space, OPTION_VALUE_REQUIRED, [qw(leftmargin leftpad ls)] ],
+  'rightspace' => [ \$right_space, OPTION_VALUE_REQUIRED, [qw(rightmargin rightpad rs)] ],
+  'width' => [ \$width, OPTION_VALUE_REQUIRED, 'w' ],
+  'curved-bottom-tab' => [ \$straight_bottom_edges, OPTION_ASSIGN_BOOL, [ ], 0, TAB_STRAIGHT_BOTTOM_EDGES ],
+  'straight-edged-tab' => [ \$straight_edged_tab, OPTION_ASSIGN_BOOL, [qw(straight nocurve)], TAB_STRAIGHT_TAB_EDGES, 0 ],
+  'tab' => \$tab_mode,
+  'div' => \$div_mode,
+  'banner' => \$banner_mode,
+  'colorize' => [ sub { enable_color(); }, 0, [qw(enable-color force-color use-color)] ],
+  'nocolor' => [ sub { disable_color(); }, 0, [qw(disable-color no-color nc)] ],
+  'help' => [ \$show_help, 0, 'h' ],
+  META_OPTION_NON_OPTIONS_REQUIRED, 1,
+);
+
+sub format_help_tab($) {
+  my ($text) = @_;
+  return NL.print_folder_tab($G.$text, G_2_3, ALIGN_LEFT).NL;
+}
+
+sub show_help {
+  local $helpfd = open_scrollable_stream() // STDERR;
+
+  printfd($helpfd, print_banner($C.'text-in-a-box', 
+    $G.'Display lines of text inside a box, in various styles and colors', $R));
+
+  my $optdiv = $K.dashed_vert_bar_3_dashes.$M;
+  my $altdiv = $K.dashed_vert_bar_3_dashes.$Y;
+
+  printfd($helpfd,     format_help_tab('Syntax').
+    '  '.$G.'text-in-a-box'.$Y.' -option1 -option2'.$M.'=value2 '.$K.' '.
+      '[-option3'.elipsis_three_dots.']'.$C." 'line1' 'line2' ".$K.elipsis_three_dots.$X.NL.
+    format_help_tab('Options').
+    '  '.$Y.join($altdiv, qw(-print -text -nobox -invisible)).$X.NL.
+    '    '.$X.'Only format, align and print the text without any surrounding box'.$X.NL.
+    '  '.$Y.'-style='.$M.join($optdiv, qw(single double rounded thick)).$X.NL.
+    '    '.$X.'Set the style of the box lines'.$X.NL.
+    '  '.$Y.'-divstyle='.$M.join($optdiv, qw(single double thick)).$X.NL.
+    '    '.$X.'Set the style of horizontal dividers (if any) specified by '.
+           $K.left_quote.$C.'%{div}'.$K.right_quote.$X.' for a line'.$X.NL.
+    '  '.$Y.'-align='.$M.join($optdiv, qw(left l center c right r)).$X.NL.
+    '    '.$X.'Set the alignment of all lines of text within the box'.$X.NL.
+    '  '.$Y.'-color='.color_and_style_sample_text($optdiv).$X.NL.
+    '    '.$X.'Set the box color and attributes'.$X.NL.
+    '  '.$Y.'-left='.$M.join($optdiv, '123', 'text-here').$X.NL.
+    '    '.$X.'Print the specified text or number of spaces before the left edge of the box'.$X.NL.
+    '  '.$Y.'-right='.$M.'text-here'.$X.NL.
+    '    '.$X.'Print the specified text after the right edge of the box'.$X.NL.
+    '  '.$Y.'-width='.$M.'123'.$X.NL.
+    '    '.$X.'Explicitly specify the width of the box in characters (by default it fits the longest line)'.$X.NL.
+    '  '.$Y.'-clear-screen'.$X.NL.
+    '    '.$X.'Clear the screen before printing anything'.$X.NL.
+    '  '.$Y.'-tab'.$X.NL.
+    '    '.$X.'Print a folder-style tab with the specified label'.$X.NL.
+    '  '.$Y.'-div'.$X.NL.
+    '    '.$X.'Print a divider line with the specified label'.$X.NL.
+    '  '.$Y.'-banner'.$X.NL.
+    '    '.$X.'Print a standard program startup banner using Colorize::print_banner()'.$X.NL.
+    '  '.$Y.'-force-color'.$X.NL.
+    '    '.$X.'Force the use of color (ANSI color codes) even if the terminal may not support it'.$X.NL.
+    '    '.$X.'(use this to redirect colorized output into a file, which disables color by default)'.$X.NL.
+    '  '.$Y.'-no-color'.$X.NL.
+    '    '.$X.'Disable the use of color even if the output appears to be a compatible terminal'.$X.NL.
+    format_help_tab('Line Formatting').
+    '  '.color_and_style_sample_text($optdiv, '%', '').$X.NL.
+    '    '.$X.'Set color and/or style of subsequent text on the same line'.$X.NL.
+    '  '.$Y.'%{div'.$M.'='.join($optdiv, qw(single double thick)).$Y.'}'.$X.NL.
+    '    '.$X.'Insert horizontal divider line, with optional line style'.$X.NL.
+    '  '.$Y.'%{rep}'.$G.'text-to-repeat'.$K.elipsis_three_dots.$Y.'%{endrep='.$M.'count'.$Y.'}'.$X.NL.
+    '    '.$X.'Repeat the specified text '.$M.'count'.$X.' times'.$X.NL.
+    '  '.$Y.'%{align='.$M.join($optdiv, qw(left center right)).$Y.'}'.$X.NL.
+    '    '.$X.'Set the alignment of subsequent text on the same line'.$X.NL.
+    '  '.$Y.'%{tab'.$M.'=color'.$K.','.$M.'<style>'.$optdiv.'flat'.$Y.'}'.$G.'label-text'.$K.elipsis_three_dots.$X.NL.
+    '    '.$X.'Add a folder tab to the top edge of the box, and print the rest of this line as the tab\'s label'.$X.NL.
+    '  '.$Y.'%{sym='.$M.$U.'symbol-name-here'.$UX.$Y.'}'.$X.NL.
+    '    '.$X.'Insert the Unicode symbol with the specified name'.$X.NL);
+    '  '.$Y.'%{endbox}'.$X.NL.
+    '    '.$X.'End the contents of the box; subsequent lines displayed outside the box'.$X.NL;
+
+  printfd($helpfd, format_help_tab('Examples of box styles using the '.$Y.'-style'.$C.' option'));
+
+  my @example_lines = ( );
+
+  foreach my $style (qw(single double rounded heavy)) {
+    my $example = text_in_a_box(
+      $Y.$style.$X.NL.
+      '%{div}'.NL.
+      $B.'(line 2)'.NL,
+      0, $B, $style, undef, 3, 12);
+    my @lines = split /\n/, $example;
+    for my $i (0..$#lines) 
+      { $example_lines[$i] .= $lines[$i]; }
+  }
+
+  foreach my $line (@example_lines) {
+    printfd($helpfd, $line.NL);
+  }
+
+  printfd($helpfd, format_help_tab('Examples of the '.$Y.'-style'.$C.' and '.$G.'-divstyle'.$C.' options'));
+
+  @example_lines = ( );
+
+  foreach my $style (qw(double heavy)) {
+    foreach my $divstyle (qw(single double)) {
+      my $example = text_in_a_box(
+        $Y.$style.$X.NL.
+        '%{div}'.NL.
+        $G.$divstyle.$X.NL,
+        0, $B, $style, $divstyle, 3, 12);
+      my @lines = split /\n/, $example;
+      
+      foreach my $i (0..$#lines) 
+        { $example_lines[$i] .= $lines[$i]; }
+    }
+  }
+
+  foreach my $line (@example_lines) {
+    printfd($helpfd, $line.NL);
+  }
+
+  printfd($helpfd, NL.format_help_tab('Examples of the '.$K.left_quote.$Y.'-tab "Label Here"'.$K.right_quote.$C.' option'));
+
+  my $max_tab_space = (3+2+12+2) * 4;  # match the total width of the example boxes printed above
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%U%Cleft%!U%K)', undef, ALIGN_LEFT, $max_tab_space));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%U%Ccenter%!U%K)', undef, ALIGN_CENTER, $max_tab_space));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%U%Cright%!U%K)', undef, ALIGN_RIGHT, $max_tab_space));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-color=%RR%!U%K)', $R, ALIGN_LEFT, $max_tab_space));
+
+  my $filler_text = $K.('.' x 20).$B.'Remaining lines in box here'.$K.('.' x 20).NL;
+
+  printfd($helpfd, NL.format_help_tab('Example of the '.$K.left_quote.$Y.'%{tab}Label Here'.$K.right_quote.$C.' option'));
+  printfd($helpfd, text_in_a_box('%{tab}Label Here'.NL.$filler_text));
+  printfd($helpfd, text_in_a_box('%{tab=center,flat}Label Here %K(with %Y%{tab=%Mcenter,flat%Y}%K)'.NL.$filler_text, ALIGN_LEFT));
+
+  printfd($helpfd, NL.format_help_tab('Examples of the '.$K.left_quote.$Y.'-div "Label Here"'.$K.right_quote.$C.' option'));
+
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%Cleft%K)', undef, ALIGN_LEFT, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%Ccenter%K)', undef, ALIGN_CENTER, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-align=%Cright%K)', undef, ALIGN_RIGHT, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
+  printfd($helpfd, print_folder_tab('Label Here %K(with %Y-color=%RR%K)', $R, ALIGN_CENTER, $max_tab_space, 'single', TAB_ONE_LINE_OVERLAY_LABEL));
+
+  printfd($helpfd, NL);
+
+  exit 0;
+}
+
+my ($lines, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, \&show_help);
+
+if (!@$lines) {
+  show_help();
+  exit 255;
+}
+
+if (!exists $box_style_aliases{$style}) { 
+  warn("Box line style $style is not defined (using 'single' instead)");
+  $style = 'single';
+}
+
+$divstyle //= $style;
+
+if (!exists $box_style_aliases{$divstyle}) { 
+  warn("Divider line style '$divstyle' is not defined (using '$style' instead)"); 
+  $divstyle = $style;
+}
+
+$boxcolor //= ($invisible_box ? $X : $B);
+$out = '';
+if ($clear_screen_first) { $out .= CLEAR_SCREEN; }
+
+if ($banner_mode) {
+  my $title = $lines->[0] // '';
+  my $description = $lines->[1] // '';
+  $out .= print_banner($title, $description, $boxcolor);
+} elsif ($tab_mode || $div_mode) {
+  my $flags = $straight_bottom_edges | $straight_bottom_edges;
+  if ($div_mode) { $flags |= TAB_ONE_LINE_OVERLAY_LABEL; }
+  $out .= print_folder_tab($lines->[0], $boxcolor, $alignment, $width, $style, $flags);
+} else {
+  $out .= text_in_a_box($lines, $alignment, $boxcolor, $style, $divstyle, $left_space, $width, $right_space);
+}
+
+printfd(STDOUT, $out);
+
+exit 0;

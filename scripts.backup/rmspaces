@@ -1,0 +1,121 @@
+#!/usr/bin/perl -w
+#use strict;
+use File::Find();
+
+# Set the variable $File::Find::dont_use_nlink if you're using AFS,
+# since AFS cheats.
+
+# for the convenience of &wanted calls, including -eval statements:
+use vars qw/*name *dir *prune/;
+*name   = *File::Find::name;
+*dir    = *File::Find::dir;
+*prune  = *File::Find::prune;
+
+my $separators = "\-\-\-\-\-\+\%\_\@\@\@\@";
+my $spaces_no_syms = ' \f\n\r\t';
+my $spaces_with_syms = "\ \f\n\r\t\&\$\|\(\)\<\>\"\'\?\*";
+my $spaces = $spaces_with_syms;
+my $recursive = 0;
+my $verbose = 0;
+my $dryrun = 0;
+my @dirlist = ();
+my @filelist = ();
+
+foreach my $arg (@ARGV) {
+  if (!defined($separators)) {
+    $separators = $arg;
+  } elsif (!defined($spaces)) {
+    $spaces = $arg;
+  } elsif (($arg eq '-p') || ($arg eq '-spaces') || ($arg eq '-match')) {
+    undef $spaces;
+  } elsif ($arg eq '-nosyms') {
+    $spaces = $spaces_no_syms;
+  } elsif ($arg eq '-syms') {
+    $spaces = $spaces_with_syms;
+  } elsif (($arg eq '=') || ($arg eq '-sep')) {
+    undef $separators;
+  } elsif ($arg eq '-nosep') {
+    $separators = '';
+    $spaces = $spaces_no_syms;
+  } elsif ($arg eq '-r') {
+    $recursive = 1;
+  } elsif ($arg eq '-v') {
+    $verbose = 1;
+  } elsif (($arg =~ /^\-t/) || ($arg =~ '^-dry')) {
+    $dryrun = 1;
+  } elsif ($arg =~ '^-') {
+    die("rmspaces: ERROR: unknown option '$arg'\n");
+  } else {
+    if (-d "$arg") {
+      push @dirlist,$arg;
+    } else {
+      push @filelist,$arg;
+    }
+  }
+}
+
+die("rmspaces: missing argument to -sep <X> option\n") unless (defined($separators));
+die("rmspaces: missing argument to -match <X> option\n") unless (defined($spaces));
+
+#prints("spaces = [$spaces], separators = [$separators], recursive = $recursive\n");
+
+#$separatorqm = quotemeta($separator);
+#$spaces_re = qr/\s+/oams;
+#$dup_separator_re = qr/(?:$separatorqm)(?:$separatorqm)+/oams;
+
+if ($verbose) {
+  prints("rmspaces: Matching spaces:           [$spaces]\n");
+  prints("rmspaces: Replacing with separators: [$separators]\n");
+  prints("rmspaces: Currently in directory ".getcwd()."\n");
+  prints("rmspaces: Doing dry run only: no renames will actually be performed\n") if ($dryrun);
+  prints("rmspaces: ".($recursive ? "recursively " : "").
+        "processing ".scalar(@dirlist)." directories and ".
+        scalar(@filelist)." files:\n");
+
+  foreach my $d (@dirlist)  { prints("  ".($recursive ? '>' : ' ')."DIR  $d\n"); }
+  foreach my $f (@filelist) { prints("  file  $f\n"); }
+  prints("\n");
+}
+
+foreach my $f (@filelist) { check_and_rename($f); }
+File::Find::finddepth({wanted => \&wanted}, @dirlist);
+#, follow_fast => 1, no_chdir => 1
+#exit;
+
+sub check_and_rename {
+  my $rmspaces_blanks_re = qr/\s+/oams;
+  my $rmspaces_syms_to_remove = qr/[\(\)\<\>\"\'\?\*]+/oams;
+  my $remove_dup_seps = qr/[\-\+\%\_]\K[\-\+\%\_]+/oams;
+
+  my ($name) = @_;
+  my $filename = basename_of($name);
+  my $dirname = directory_of($name);
+
+  my $newname = ($filename =~ s/$rmspaces_blanks_re/-/roamsg);
+  $newname =~ tr/&$|/+%_/;
+  $newname =~ s/$rmspaces_syms_to_remove//oamsg;
+  $newname =~ s/$rmspaces_syms_to_remove//oamsg;
+  # Fix repeats like e.g. word1 - word2 => word1---word2 (should be word1-word2)
+  $newname =~ s/$remove_dup_seps//oamsg;
+  $newname = $dirname . '/' . $newname;
+
+  if ($newname ne $name) {
+    if (-e "$newname") {
+      printfd(STDERR, "rmspaces: Warning: cannot rename $name => $newname: destination already exists!\n");
+      return 0;
+    }
+    prints("$name => $newname\n");
+    return 1 if ($dryrun);
+    rename($name, $newname) || die("rmspaces: ERROR: cannot rename $name => $newname (errno $!)\n");
+    return 1;
+  }
+  return 0;
+}
+
+#eval "$newname =~ tr/$spaces/$separators/ds" ..
+#my $newname = ($name =~ s/$spaces_re/$separator/roamsg);
+#$newname =~ s/$dup_separator_re/$separator/oamsg;
+
+sub wanted {
+  return check_and_rename($name);
+}

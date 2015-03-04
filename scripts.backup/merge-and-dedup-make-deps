@@ -1,0 +1,47 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+
+use integer; use warnings;
+
+#! autoimport {
+#! } # (end autoimport)
+
+my $filter_by_target_suffix = $ARGV[0]) ? quotemeta($ARGV[0]) : '\.[^\:\s]+');
+my $output_target_filename = $ARGV[0];
+#my $target_and_deps_re = qr/^([^\:\.\s]++ (?: $filter_by_target_suffix)? ) \s*+ \: \s*+ (.*+)$/oax;
+my $target_and_deps_re = qr/^([^\:]++) \: \s*+ (\N*+) \n/oamsx;
+#my $target_and_deps_re = qr/^(\N++) \n/oamsx;
+my $dep_list_re = qr/\G (?: \.\/)? (\S++) (?: \Z | \s++)/oamsx;
+
+sub read_stdin { local $/; return <STDIN>; }
+my $in = read_stdin();
+
+my @ordered_deps = ( );
+my %existing_deps = ( );
+
+#prints("in = [$in]\n");
+
+while ($in =~ /$target_and_deps_re/oamsxg) {
+  my ($target, $deps) = ($1, $2);
+  prints("process target [$target] deps [$deps]:\n");
+  while ($deps =~ /$dep_list_re/oamsxg) {
+    my $f = $1;
+    next if ($f =~ m{^[=:/]}oax);
+    my $isnew = (!exists $existing_deps{$f}) ? 1 : 0;
+    my $order = scalar(@ordered_deps);
+    if (!exists $existing_deps{$f}) {
+      printf("  NEW  #%-4d  =>  %s\n", $order, $f);
+      $existing_deps{$f} = $order;
+      push @ordered_deps,$f;
+    } else {
+      printf("  OLD         =>  %s\n", $f);
+    }
+  }
+}
+
+my $out = $output_target.':';
+
+foreach my $dep (@ordered_deps) { $out .= ' '.$dep; }
+$out .= "\n";
+
+prints($out);

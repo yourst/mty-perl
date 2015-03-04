@@ -6,6 +6,8 @@ colorize-make
 colorize-man
 consolidate-deps
 cpuinfo
+dump-storable
+emacs-colors-to-perl
 filter-defines
 find-packages-and-deps-in-cpan-dist
 group-by-suffix
@@ -30,15 +32,16 @@ perlwhich
 ppidump
 print-table
 print-tree
+query-perl-config
 quotelines
 rmspaces
 rpmsummary
 shade-alternating-lines
+show-ascii-chars
 show-printable-symbols
 stracefiles
 strip-by-defines
 summarize-ip-list
 symlink-list
-test-command-line
 text-in-a-box
 whoelse

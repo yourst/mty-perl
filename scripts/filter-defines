@@ -67,6 +67,7 @@ use MTY::Display::Colorize;
 use MTY::Display::ColorizeErrorsAndWarnings;
 use MTY::Display::TextInABox;
 use MTY::Display::PrintableSymbolTools;
+use MTY::Display::StringFormats;
 use MTY::Display::PrintableSymbols;
 use MTY::RegExp::Define;
 use MTY::RegExp::Tools;

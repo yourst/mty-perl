@@ -9,6 +9,7 @@
 package MTY::System::POSIX;
 
 use integer; use warnings; use Exporter qw(import);
+use Symbol;
 require 'syscall.ph';
 
 my @POSIX_symbols;
@@ -115,6 +116,20 @@ use POSIX::2008 (@POSIX_2008_symbols);
 use Fcntl (@Fcntl_symbols);
 use Errno (@Errno::EXPORT, @Errno::EXPORT_OK);
 use IO::Dirent qw(readdirent);
+# use IO::Dir::Dirfd qw(fileno);
+
+#pragma end_of_includes
+
+# Determine if the Perl environment uses 32-bit or 64-bit data types:
+use constant {
+  NATIVE_BIT_WIDTH => (((~0) == 0xffffffff) ? 32 : 64),
+};
+
+use constant {
+  PLATFORM_32_BIT => (NATIVE_BIT_WIDTH == 32),
+  PLATFORM_64_BIT => (NATIVE_BIT_WIDTH == 64),
+};
+
 
 # Defined by the latest Linux kernels but not yet in the Perl definitions:
 use constant O_PATH => 010000000;
@@ -138,10 +153,12 @@ sub is_file_handle {
   return (defined fileno($_[0])) ? 1 : 0;
 }
 
-sub get_native_fd($) {
-  my ($fd_or_handle) = @_;
-  my $fd_of_handle = fileno($fd_or_handle);
-  return $fd_of_handle // $fd_or_handle;
+sub dirfd {
+  # return IO::Dir::Dirfd::fileno($_[0]);
+}
+
+sub get_native_fd {
+  return (defined $_[0]) ? (fileno($_[0]) // $_[0]) : undef;
 }
 
 #
@@ -200,6 +217,24 @@ my $strip_last_path_component_re =
 sub clock_gettime_nsec() {
   my ($sec, $nsec) = POSIX::2008::clock_gettime();
   return ($sec * 1000000000) + $nsec;
+}
+
+sub clock_nanosecs() {
+  my ($sec, $nsec) = clock_gettime(CLOCK_REALTIME);
+  return ($sec * 1000000000) + $nsec;
+}
+
+sub inode_and_type_of_dir_entry($) {
+  my ($e) = @_;
+  return (
+    ($e & ((1 << 60) - 1)), 
+    (($e >> 60) & 0xf),
+  );
+}
+ 
+sub sys_readdir_ext($) {
+  my ($fd) = @_;
+  return (map { $_->{name} => (($_->{inode} & ((1 << 60) - 1)) | ($_->{type} << 60)) } readdirent($fd));
 }
 
 my $open_path_default_flags = O_PATH | O_RDONLY | O_CLOEXEC;
@@ -284,15 +319,211 @@ sub path_of_open_fd($) {
   return $path;
 }
 
-sub sys_close {
-  my ($fd) = @_;
-  $fd = fileno($fd) // $fd;
+#
+# The following hook functions are injected into the core Perl symbol table
+# so they will be invoked first whenever literally any other code (whether
+# written in Perl and/or C/XS/etc. interfacing with Perl) subsequently 
+# attempts to use these functions.
+#
+# These hooks are necessary to maintain the coherence and correctness of
+# the $path_of_open_fd_cache[] array, since the hooks intercept every call
+# which could possibly result in a file descriptor suddenly referring to
+# another file instead of whatever was cached in $path_of_open_fd_cache.
+#
+# Specifically, all flavors of open (open(), sysopen(), opendir()), close
+# (close(), closedir()) and dup (dup(), dup2()) are intercepted. The hook
+# functions for these essentially just determine which argument and/or 
+# result refers to a file descriptor (translating from a Perl handle with
+# fileno($handle) as needed), then undefines $path_of_open_fd_cache[$fd],
+# and finally jumps directly to the original Perl provided function.
+#
+sub invalidate_cached_path_for_fd {
+  return if (!defined $_[0]);
+  my $fd = get_native_fd($_[0]);
+  
+  # print(STDERR 'Invalidating mapping of fd ', $fd, ' to cached path ',
+  #   ((defined $fd) ? ($path_of_open_fd_cache[$fd] // '<not cached>') : '<fd undefined>'), "\n");
+
+  return if (!defined $fd);
   $path_of_open_fd_cache[$fd] = undef;
+}
+
+our @invalidate_cached_fd_hooks;
+our @invalidate_cached_readonly_fd_hooks;
+our @invalidate_cached_path_hooks;
+
+INIT {
+  @invalidate_cached_readonly_fd_hooks = ( \&invalidate_cached_path_for_fd );
+  @invalidate_cached_fd_hooks = ( );
+  @invalidate_cached_path_hooks = ( );
+};
+
+# Invalidate any cached metadata associated with the specified path:
+sub call_invalidate_cached_path_hooks
+  { foreach my $func (@invalidate_cached_path_hooks) { $func->(@_); } }
+
+# Invalidate any cached metadata associated with this fd, since it may be 
+# modified, in addition to invalidating any read-only fd <-> path mappings:
+sub call_invalidate_cached_fd_hooks {
+  foreach my $func (@invalidate_cached_readonly_fd_hooks) { $func->(@_); } 
+  foreach my $func (@invalidate_cached_fd_hooks) { $func->(@_); } 
+}
+
+# Only invalidate any cached mappings between the fd and its filesystem path:
+sub call_invalidate_cached_readonly_fd_hooks 
+  { foreach my $func (@invalidate_cached_readonly_fd_hooks) { $func->(@_); } }
+
+my $perl_open_mode_re = 
+    qr{\A ([\<\>\+\-\&\|]*+)}oamsx;
+
+my $perl_pipe_open_mode_re = 
+    qr{(?> \A [\<\>\+\-\&]*+ \|) | (?> \| \Z)}oamsx;
+
+my $perl_write_file_modes_re =
+    qr{[\>\+]}oamsx;
+
+my $perl_open_mode_and_filename_re = 
+    qr{$perl_open_mode_re (.++) \Z}oamsx;
+
+sub perl_open_hook(*;$@) {
+  #
+  # Perl's built-in open() function is unusual because callers can pass the
+  # *name* of the symbol in their package namespace into which open() should 
+  # place the opened file handle. This means we cannot simply invoke the 
+  # built-in open() once we've reached this hook function, since this "magic"
+  # will be stripped as soon as we do anything with $_[0] (including merely
+  # calling the real open() with it). Therefore, the following code manually
+  # looks up that symbol in the caller's namespace to avoid this problem:
+  #
+
+  if ((defined $_[0]) && (!ref $_[0])) 
+    { splice @_, 0, 1, Symbol::qualify_to_ref($_[0], (caller)[0]); }
+
+  my $argc = scalar @_;
+  my $mode; my $filename;
+  if ($argc <= 2) {
+    # 2-arg form: mode and filename are combined into a single argument $_[1]:
+    ($mode, $filename) = ($_[1] =~ /$perl_open_mode_and_filename_re/oamsx);
+  } else {
+    # 3-arg form: mode is in $_[1], filename is in $_[2]
+    ($mode, $filename) = @_[1,2];
+  }
+
+  my $is_write = ($mode =~ /$perl_write_file_modes_re/oamsx) ? 1 : 0;
+  my $is_pipe = ($mode =~ /$perl_pipe_open_mode_re/oamsx) ? 1 : 0;
+
+  # my ($caller_package, $caller_file, $caller_line) = caller(0);
+  # 
+  # print(STDERR 'perl_open_hook: ', ($caller_file // '?'), ':', 
+  #       ($caller_line // '?'), ' (package ', $caller_package, 
+  #       ') is opening "', ($filename // '<undef>'), 
+  #       '", mode "', $mode, '", argc ', $argc, ', is_write? ', 
+  #       $is_write, ', is_pipe? ', $is_pipe, ', target symbol ',
+  #       ($_[0] // '<undef>'), "\n");
+
+  if ($is_write && (defined $filename) && (!$is_pipe))
+    { call_invalidate_cached_path_hooks($filename); }
+
+  my $result = 
+    ($argc == 1) ? CORE::open($_[0]) :
+    ($argc == 2) ? CORE::open($_[0], $_[1]) :
+    ($argc == 3) ? CORE::open($_[0], $_[1], $_[2]) :
+    CORE::open($_[0], $_[1], $_[2], @_[3..($argc-1)]); 
+
+  if ($result && (!$is_pipe)) {
+    if ($is_write) { call_invalidate_cached_fd_hooks($_[0]); }
+      else { call_invalidate_cached_readonly_fd_hooks($_[0]); }
+  }
+
+  # print(STDERR 'perl_open_hook: done opening filename "', ($filename // '<undef>'), 
+  #       '", mode "', $mode, '", is_write? ', $is_write, ' => result ',
+  #       ($result // '<undef>'), ', handle ', ($_[0] // '<undef>'), ', fd ', 
+  #       (fileno($_[0]) // '<undef>'), "\n");
+
+  return $result;
+};
+
+sub perl_sysopen_hook(*;$$;$) {
+  # See comments above for perl_open_hook():
+  if ((defined $_[0]) && (!ref $_[0])) 
+    { splice @_, 0, 1, Symbol::qualify_to_ref($_[0], (caller)[0]); }
+
+  my ($filename, $mode, $perms) = @_[1,2,3];
+  my $accmode = ($mode & O_ACCMODE);
+  my $is_write = (($accmode == O_WRONLY) || ($accmode == O_RDWR) ||
+       (($mode & (O_CREAT | O_TRUNC | O_APPEND | O_EXCL)) != 0));
+
+  if ($is_write && (defined $filename)) 
+    { call_invalidate_cached_path_hooks($filename); }
+
+  my $result = 
+    ($argc == 3) ? CORE::sysopen($_[0], $_[1], $_[2]) :
+    CORE::sysopen($_[0], $_[1], $_[2], $_[3]);
+
+  if ($result) {
+    if ($is_write) { call_invalidate_cached_fd_hooks($_[0]); }
+    else { call_invalidate_cached_readonly_fd_hooks($_[0]); }
+  }
+
+  return $result;
+};
+
+sub perl_opendir_hook(*$) {
+  # See comments above for perl_open_hook():
+  if ((defined $_[0]) && (!ref $_[0])) 
+    { splice @_, 0, 1, Symbol::qualify_to_ref($_[0], (caller)[0]); }
+
+  my $result = CORE::opendir($_[0], @_[1..$#_]);
+
+  # Directories are always opened read only, so there's no need
+  # to invalidate any caches other than the fd -> path mapping.
+  # However,
+  # call_invalidate_cached_readonly_fd_hooks($_[0]);
+  return $result;
+};
+
+sub perl_close_hook(;*) {
+  my $fd = fileno($_[0]);
+
+# FIXME:
+#  if ($is_write && (defined $filename)) 
+#    { call_invalidate_cached_path_hooks($filename); }
+
+  $path_of_open_fd_cache[$fd] = undef if (defined $fd);
+
+  goto &CORE::close;
+};
+
+sub perl_closedir_hook(*) {
+  # &call_invalidate_cached_readonly_fd_hooks;
+  goto &CORE::closedir;
+};
+
+sub perl_link_hook($$) 
+  { call_invalidate_cached_path_hooks($_[1]); goto &CORE::link; }
+
+sub perl_mkdir_hook(_;$)
+  { call_invalidate_cached_path_hooks($_[0]); goto &CORE::mkdir; }
+
+sub perl_rename_hook($$)
+  { &call_invalidate_cached_path_hooks; goto &CORE::rename; }
+
+sub perl_rmdir_hook(_)
+  { &call_invalidate_cached_path_hooks; goto &CORE::rmdir; }
+
+sub perl_symlink_hook($$)
+  { call_invalidate_cached_path_hooks($_[1]); goto &CORE::symlink; }
+
+sub perl_unlink_hook(@)
+  { &call_invalidate_cached_path_hooks; goto &CORE::unlink; }
+
+sub sys_close {
+  &call_invalidate_cached_readonly_fd_hooks;
   goto &POSIX::close;
 }
 
 sub sys_closedir {
-  my ($fd) = @_;
+  # &invalidate_cached_path_for_fd;
   #
   # Directories handles in Perl are screwy - there isn't a general way to
   # get the underlying file descriptor for a dir handle even though there
@@ -304,55 +535,30 @@ sub sys_closedir {
 }
 
 sub sys_dup {
-  my ($fd) = @_;
-  my $newfd = POSIX::dup($fd);
-  if (defined $newfd) { $path_of_open_fd_cache[$fd] = undef; }
+  my $newfd = &POSIX::dup;
+  call_invalidate_cached_readonly_fd_hooks($newfd);
   return $fd;
 }
 
 sub sys_dup2 {
   my ($fd, $newfd) = @_;
-  if (defined $newfd) { $path_of_open_fd_cache[$fd] = undef; }
+  call_invalidate_cached_readonly_fd_hooks($newfd);
   goto &POSIX::dup2;
-}
-
-sub perl_close_hook {
-  my ($handle) = @_;
-  my $fd = fileno($handle);
-  if (defined $fd) { $path_of_open_fd_cache[$fd] = undef; }
-  goto &CORE::close;
-};
-
-sub perl_closedir_hook {
-  my ($handle) = @_;
-  my $fd = fileno($handle);
-  if (defined $fd) { $path_of_open_fd_cache[$fd] = undef; }
-  goto &CORE::closedir;
-};
-
-sub inode_and_type_of_dir_entry($) {
-  my ($e) = @_;
-  return (
-    ($e & ((1 << 60) - 1)), 
-    (($e >> 60) & 0xf),
-  );
-}
- 
-sub sys_readdir_ext($) {
-  my ($fd) = @_;
-  return (map { $_->{name} => (($_->{inode} & ((1 << 60) - 1)) | ($_->{type} << 60)) } readdirent($fd));
-}
-
-sub clock_nanosecs() {
-  my ($sec, $nsec) = clock_gettime(CLOCK_REALTIME);
-  return ($sec * 1000000000) + $nsec;
 }
 
 BEGIN {
   no warnings;
-# *CORE::GLOBAL::close = *perl_close_hook;
-# *CORE::GLOBAL::closedir = *perl_closedir_hook;
-  use warnings;
+  #*CORE::GLOBAL::open = \&perl_open_hook;
+  #*CORE::GLOBAL::sysopen = \&perl_sysopen_hook;
+  #*CORE::GLOBAL::opendir = \&perl_opendir_hook;
+  *CORE::GLOBAL::close = \&perl_close_hook;
+  #*CORE::GLOBAL::closedir = \&perl_closedir_hook;
+  *CORE::GLOBAL::link = \&perl_link_hook;
+  *CORE::GLOBAL::mkdir = \&perl_mkdir_hook;
+  *CORE::GLOBAL::rename = \&perl_rename_hook;
+  *CORE::GLOBAL::rmdir = \&perl_rmdir_hook;
+  *CORE::GLOBAL::symlink = \&perl_symlink_hook;
+  #*CORE::GLOBAL::unlink = \&perl_unlink_hook;
 };
 
 BEGIN {
@@ -434,7 +640,11 @@ preserve:; our @EXPORT = (
   getpid clock_gettime_nsec sys_open_path path_of_open_fd 
   path_is_symlink get_native_fd is_file_handle sys_readdir_ext
   inode_and_type_of_dir_entry uncached_path_of_open_fd
-  clock_nanosecs)
+  clock_nanosecs dirfd
+  @invalidate_cached_fd_hooks
+  @invalidate_cached_readonly_fd_hooks
+  @invalidate_cached_path_hooks
+  NATIVE_BIT_WIDTH PLATFORM_32_BIT PLATFORM_64_BIT)
 );
 
 1;

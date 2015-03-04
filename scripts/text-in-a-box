@@ -18,6 +18,7 @@ use MTY::Display::TextInABox;
 use MTY::Display::Colorize;
 use MTY::Display::ColorizeErrorsAndWarnings;
 use MTY::Display::PrintableSymbolTools;
+use MTY::Display::StringFormats;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::Scrollable;
 use MTY::RegExp::Define;
@@ -77,7 +78,7 @@ my %command_line_options = (
   'color' => [
     sub {
       $boxcolor = '';
-      foreach $shortname (split //oax, $_[0]) {
+      foreach my $shortname (split //oax, $_[0]) {
         my $codes = $color_markup_to_code_map{$shortname};
         if (!defined($codes)) { 
           warn("Invalid color or formatting code: '$shortname'\n"); 
@@ -168,18 +169,18 @@ sub show_help {
 
   my @example_lines = ( );
 
-  foreach $style (qw(single double rounded heavy)) {
+  foreach my $style (qw(single double rounded heavy)) {
     my $example = text_in_a_box(
       $Y.$style.$X.NL.
       '%{div}'.NL.
       $B.'(line 2)'.NL,
       0, $B, $style, undef, 3, 12);
     my @lines = split /\n/, $example;
-    foreach ($i = 0; $i < scalar(@lines); $i++) 
+    for my $i (0..$#lines) 
       { $example_lines[$i] .= $lines[$i]; }
   }
 
-  foreach $line (@example_lines) {
+  foreach my $line (@example_lines) {
     printfd($helpfd, $line.NL);
   }
 
@@ -187,8 +188,8 @@ sub show_help {
 
   @example_lines = ( );
 
-  foreach $style (qw(double heavy)) {
-    foreach $divstyle (qw(single double)) {
+  foreach my $style (qw(double heavy)) {
+    foreach my $divstyle (qw(single double)) {
       my $example = text_in_a_box(
         $Y.$style.$X.NL.
         '%{div}'.NL.
@@ -196,12 +197,12 @@ sub show_help {
         0, $B, $style, $divstyle, 3, 12);
       my @lines = split /\n/, $example;
       
-      foreach ($i = 0; $i < scalar(@lines); $i++) 
+      foreach my $i (0..$#lines) 
         { $example_lines[$i] .= $lines[$i]; }
     }
   }
 
-  foreach $line (@example_lines) {
+  foreach my $line (@example_lines) {
     printfd($helpfd, $line.NL);
   }
 

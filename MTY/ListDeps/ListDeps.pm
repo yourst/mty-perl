@@ -54,18 +54,34 @@ use MTY::Display::Colorize;
 use MTY::Display::ColorCapabilityCheck;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;
+use MTY::Display::StringFormats;
 use MTY::Display::TextInABox;
 use MTY::Display::Table;
 use MTY::Display::Tree;
+use MTY::Display::TreeBuilder;
 use MTY::Display::DataStructures;
 
+#
+# lsdeps Base Packages:
+#
 use MTY::ListDeps::Config;
 use MTY::ListDeps::Source;
+use MTY::ListDeps::OutputFormats;
 
+#
+# Plugins:
+#
 use MTY::ListDeps::Perl;
 use MTY::ListDeps::C;
+use MTY::ListDeps::Makefile;
+# use MTY::ListDeps::ShellScript;
+# use MTY::ListDeps::Python;
+# use MTY::ListDeps::ELFBinary;
+# use MTY::ListDeps::RPMPackage;
+# use MTY::ListDeps::ConfFile;
 
 #pragma end_of_includes
+
 
 preserve:; our @EXPORT = qw(main);
 
@@ -87,33 +103,114 @@ my $dep_file_line_re =
 # is intended to configure global state only.
 #
 
-sub main(+) {
+#
+# Using all collected metadata on all known sources, construct a generic
+# hash for dependencies of the specified type which maps any given filename
+# (the hash key) to an array of other filenames on which it depends. We'll
+# construct a separate hash in this format for each of the dependency types
+# (i.e. symbolic, direct, recursive, inverse) the user has requested. These
+# hashes are then passed to the output format plugins for formatting.
+#
+
+sub format_and_print_output($+) {
+  my ($fd, $outspec) = @_;
+
+  my $top_level_source_filenames = [
+    sort 
+    map { $_->{filename} } 
+    grep { ($show_deps_for_every_file_found || $_->{explicitly_listed}) } @sources
+  ];
+
+  my @dep_type_to_hash_of_dep_lists = ( );
+
+  my $compatible_dep_types = $outspec->{compatible_dep_types};
+
+  my @selected_dep_types = (defined $compatible_dep_types)
+    ? (@$compatible_dep_types) 
+    : filter_pairs(
+      $show_symbolic_deps => SYMBOLIC_DEPS,
+      $show_direct_deps => DIRECT_DEPS,
+      $show_all_deps => RECURSIVE_DEPS,
+      $show_inverse_deps => INVERSE_DEPS);
+
+  foreach my $deptype (@selected_dep_types) {
+    my $filenames_to_dep_lists = { };
+    $dep_type_to_hash_of_dep_lists[$deptype] = $filenames_to_dep_lists;
+
+    foreach my $source (@sources) {
+      my $filename = $source->{filename};
+      my $deps = $source->get_deps_by_type($deptype);
+      $filenames_to_dep_lists->{$filename} = 
+        [ map { filename_of_source($_) } @$deps ];
+    }
+
+    $filenames_to_dep_lists->{(ALL_SELECTED_SOURCES_KEY)} = 
+      $top_level_source_filenames;
+  }
+
+  my $func = $outspec->{function};
+
+  foreach my $deptype (@selected_dep_types) {
+    my $filenames_to_dep_lists = $dep_type_to_hash_of_dep_lists[$deptype];
+    #use DDS; pp $filenames_to_dep_lists;
+    
+    my @out = $func->($outspec, $top_level_source_filenames, 
+          $filenames_to_dep_lists, \%filename_to_source, $deptype);
+
+    printfd($fd, join(NL, @out));
+  }
+}
+
+sub adjust_end_of_includes_pragma() {
+  printfd(STDERR, print_folder_tab(G.'Adjusting '.K.left_quote.C.'#pragma end_of_includes'.K.right_quote.' markers:', G_1_2), NL);
+
+  foreach my $source (@sources) {
+    next if (!$source->{explicitly_listed});
+    my $filename = $source->{filename};
+    my $newcode = $source->adjust_end_of_includes_pragma();
+    if (defined $newcode) {
+      if ($print_code_to_stdout) {
+        printfd(STDOUT, $newcode);
+      } else {
+        if (write_file_safely($filename, $newcode)) {
+          printfd(STDERR, ' '.G.checkmark.' '.Y.'Saved adjusted source code back into ', 
+                  format_filesystem_path($filename), NL);
+        } else {
+          warning('Could not write updated source code back to ', $filename, 
+                  '; original file has not been modified.');
+        }
+      }
+    }
+  }
+}
+
+sub main {
   my ($filenames, $invalid_option_indexes, $command_line_option_values) = 
-    parse_listdeps_command_line();
+    parse_listdeps_command_line(@_);
 
   my $cache = (defined $cache_file_name) 
     ? retrieve_all_cached_metadata() : undef;
 
-  my @plugin_classes = map { $plugin_name_to_class{$_} } @plugins;
+  configure_global_settings($cache);
+  printdebug{'Ready to read ', scalar(@$filenames), ' sources'};
 
-  foreach my $plugin (@plugin_classes) {
-    if (!$plugin->configure($command_line_option_values, $filenames, $cache))
-      { die("Plugin '$name' failed to initialize"); }
-  }
-
-  MTY::ListDeps::Source->configure($command_line_option_values, $filenames, $cache);
-
+  printfd(STDERR, $listdeps_banner, NL) if (
+    $show_tree || $show_supported_file_types || 
+    $adjust_end_of_includes_pragma);
+  
   if ($show_supported_file_types) {
     show_supported_file_types();
     return 0;
   }
-
+  
   foreach my $filename (@$filenames) {
     $filename = resolve_path($filename);
     my $source = read_source_and_instantiate_by_type($filename);
+    next if (!defined $source);
     $source->{explicitly_listed} = 1;
     $source->resolve_symbolic_deps_to_filenames();
   }
+  
   if ($find_recursive_deps) { collect_deps_recursively(@$filenames); }
 
   @sources = sort { $a->{filename} cmp $b->{filename} } (map { filename_to_source($_) } @sources);
@@ -126,80 +223,24 @@ sub main(+) {
 
   if ($find_recursive_deps) { resolve_all_recursive_deps(); }
 
-  my %tree_key_to_deplist = ( );
-  my %tree_key_to_label = ( );
-
   my @all_source_filenames = sort keys %filename_to_source;
 
   my $longest_prefix = longest_common_path_prefix(@all_source_filenames);
   register_path_prefixes($longest_prefix => 'prefix') if (length ($longest_prefix // ''));
-  
-  if ($show_tree) {
-    #
-    # Recursive deps make no sense for tree format, since the structure
-    # of the tree itself depicts the recursion, so flattening it would
-    # serve no purpose and would erroneously yield a two level tree:
-    #
-    my $deptype = 
-      ($show_symbolic_deps) ? SYMBOLIC_DEPS :
-      ($show_direct_deps) ? DIRECT_DEPS :
-      ($show_inverse_deps) ? INVERSE_DEPS : DIRECT_DEPS;
 
-    if (!defined $deptype) { die("Undefined dependency type $deptype"); }
-
-    foreach my $source (@sources) {
-      my $filename = $source->{filename};
-      my $deps = $source->get_deps_by_type($deptype);
-      $tree_key_to_deplist{$filename} = [ (map { filename_of_source($_) } @$deps) ];
-      my $typespec = $source->{type};
-      my $tree_node_symbol_cmd = $typespec->{tree_node_symbol_cmd} // arrow_tri;
-      my $tree_node_symbol_dark_cmd = $typespec->{tree_node_symbol_dark_cmd} // arrow_open_tri;
-      $tree_key_to_label{$filename} = [
-        $tree_node_symbol_cmd,
-        $source->condense_filename()
-      ];
-    }
-
-    $tree_key_to_deplist{all} = ($show_deps_for_every_file_found) ?
-      [ @sorted_filenames ] : $filenames;
-    
-    $tree_key_to_label{all} = C.U.'(All Specified Input Files)'.UX;
-
-    my $tree = dependency_graph_to_tree('all', %tree_key_to_deplist, %tree_key_to_label);
-    print_tree($tree);
-
-    print(NL, print_folder_tab(Y.U.'Path Prefix Abbreviations:'.X));
-    print(format_table(
-      [ pairmap { [ (format_filesystem_path(strip_trailing_slash($a), undef, undef, 1).X, $b) ] }
-          hash_sorted_by_keys_as_pair_array(%path_prefixes) ],
-      row_prefix => '    ', 
-      colseps => B.'  '.arrow_barbed.'  '.X,
-      padding => K_1_2.dot_small,
-    ));
-    print(NL);
+  if ($adjust_end_of_includes_pragma) {
+    adjust_end_of_includes_pragma();
   } else {
-    foreach my $source (@sources) {
-      next if ((!$show_deps_for_every_file_found) && (!$source->{explicitly_listed}));
-      my $filename = $source->{filename};
-      if ($show_tree) {
-        my $tree = dependency_graph_to_tree($filename, %tree_key_to_deplist, %tree_key_to_label);
-        print_tree($tree);
-      } else {
-        my $out = '';
-        
-        $out .= $source->format_deps(SYMBOLIC_DEPS, $output_format).NL if ($show_symbolic_deps);
-        $out .= $source->format_deps(DIRECT_DEPS, $output_format).NL if ($show_direct_deps);
-        $out .= $source->format_deps(ALL_DEPS, $output_format).NL if ($show_all_deps);
-        $out .= $source->format_deps(INVERSE_DEPS, $output_format).NL if ($show_inverse_deps);
-        prints($out);
-      }
-    }
+    # this should be checked by parse_listdeps_command_line():
+    die if (!defined $output_format_spec);
+
+    format_and_print_output(STDOUT, $output_format_spec);
   }
 
-  if (defined $cache_file_name) {
-    my $cache = prepare_to_store_sources_to_cache_file();
+  if (is_there($cache_file_name)) {
+    my $cache = ($disable_deps_cache) ? { } : prepare_to_store_sources_to_cache_file();
 
-    foreach my $plugin (@plugin_classes) {
+    foreach my $plugin (@plugins) {
       $plugin->prepare_to_store_global_data_into_cache_file($cache);
     }
 

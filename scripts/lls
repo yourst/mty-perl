@@ -36,6 +36,7 @@ use MTY::Display::ColorizeErrorsAndWarnings;
 use MTY::Display::ANSIColorREs;
 use MTY::Display::PrintableSymbols;
 use MTY::Display::PrintableSymbolTools;
+use MTY::Display::StringFormats;
 use MTY::Display::Table;
 use MTY::Display::Tree;
 use MTY::Display::TextInABox;
@@ -55,7 +56,7 @@ use Time::Piece;
 #
 # These are set by various command line options:
 #
-my $sort_field = STAT_TYPE;
+my $sort_field = 'type';
 my $sort_reverse = 0;
 my $long_format = 1;
 my $show_all = 1;
@@ -163,18 +164,18 @@ my @file_type_enhanced_symbols = (
 
 my @file_type_textual_symbols = (
   'X', # (invalid)
-  'p', # (pipe)
-  'c', # (char dev)
+  p_in_circle, # (pipe)
+  degrees_c, # (char dev)
   '?',   
-  chr(0x216e), # directory
+  roman_numeral_d, # directory
   '?',  
-  'b', # (block dev)
+  double_disc, # (block dev)
   '?',
   ' ', # (file)
   '?',  
   large_arrow_barbed,  # (symlink)
   '?',   
-  's', # (socket)
+  lightning_spark, # (socket)
   '?',   
   '?', 
   '?'
@@ -183,11 +184,11 @@ my @file_type_textual_symbols = (
 my @mount_type_colors = (
   fg_color_rgb(255, 165, 63),    # (block dev)
   fg_color_rgb(64, 64, 255),    # (bind mount)
-  $B,    # (memory tmpfs)
-  $Y,    # (system - provided by kernel)
-  $K,    # (anonymous namespaces)
-  $G,    # (network)
-  $M,    # (fuse)
+  B,    # (memory tmpfs)
+  Y,    # (system - provided by kernel)
+  K,    # (anonymous namespaces)
+  G,    # (network)
+  M,    # (fuse)
 );
 
 my @mount_type_enhanced_symbols = (
@@ -219,8 +220,8 @@ my @subvol_type_colors = (
 );
 
 my @subvol_type_textual_symbols = (
-  roman_numeral_v,
-  'SS' 
+  medium_large_v, # roman_numeral_v,
+  section_symbol.section_symbol,
 );
 
 sub get_file_type_color($) {
@@ -761,7 +762,7 @@ sub format_directory_path($;$$) {
   $color //= $directory_color;
   $sep_color //= scale_rgb_fg($color, $shaded_color_coeff);
   my $replacement = $sep_color.large_right_slash.$color;
-  return $color.(normalize_trailing_slash($path) =~ s{/}{$replacement}roamsxg);
+  return $color.(normalize_and_add_trailing_slash($path) =~ s{/}{$replacement}roamsxg);
 }
 
 sub format_filename($$$) {
@@ -920,7 +921,7 @@ sub format_openfds($+) {
   my $shortdesc = '';
 
   my $n = scalar @open_as_types;
-  for (my $i = 0; $i < $n; $i++) {
+  for my $i (0..($n-1)) {
     next if (!$open_as_types[$i]);
     $longdesc .= ', ' if (length $longdesc);
     $longdesc .= $open_type_to_long_description[$i];
@@ -1041,8 +1042,8 @@ my %command_line_options = (
   'long' => [ \$long_format, OPTION_SINGLE_CHAR_COMBINABLE, 'l' ],
   'show-all' => [ \$show_all, OPTION_SINGLE_CHAR_COMBINABLE, 'a' ],
   'sort' => [ \$sort_field, OPTION_VALUE_REQUIRED, [ ], \%stat_field_name_to_index_map, \%stat_field_index_to_name_map ],
-  'sort-by-size' => [ \$sort_field, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 'S' ], STAT_SIZE ],
-  'sort-by-time' => [ \$sort_field, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 't' ], STAT_MTIME_NS ],
+  'sort-by-size' => [ \$sort_field, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 'S' ], 'size' ],
+  'sort-by-time' => [ \$sort_field, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 't' ], 'mtime' ],
   'reverse' => [ \$sort_reverse, OPTION_SINGLE_CHAR_COMBINABLE, [qw(r ascending)] ],
   'human-readable' => [ \$human_readable_sizes, OPTION_ASSIGN_BOOL | OPTION_SINGLE_CHAR_COMBINABLE, [ 'h' ] ],
   'digits' => [ \$max_file_size_decimal_digits, OPTION_VALUE_REQUIRED, [qw(size-digits file-size-digits)] ],
@@ -1236,6 +1237,8 @@ sub main(@) {
   my ($pathargs, $invalid_option_indexes, $option_values) = 
     parse_and_check_command_line(%command_line_options, @args, @command_line_options_help);
 
+  $sort_field = $stat_field_name_to_index_map{$sort_field};
+
   # If no arguments were specified, use the current directory
   if (!@$pathargs) { $pathargs = [ '.' ]; }
 
@@ -1350,7 +1353,7 @@ sub main(@) {
   foreach my $dirname (sort keys %dir_to_filename_list) {
     my $filenames = $dir_to_filename_list{$dirname};
     my $dirfd = $dir_to_dir_path_fd{$dirname};
-    my $prefix = ($unique_dir_count > 1) ? normalize_trailing_slash($dirname) : '';
+    my $prefix = ($unique_dir_count > 1) ? normalize_and_add_trailing_slash($dirname) : '';
     stat_files_in_directory($dirname, $filenames, $stats_to_query, 
                             $dirfd, undef, $open_files,
                             $allstats, $prefix);
@@ -1438,8 +1441,8 @@ sub main(@) {
 
     if ($skip) { $filename = undef; next; }
 
-    if (!defined $common_uid) { $common_uid = $fileuid; }
-    if (!defined $common_gid) { $common_gid = $filegid; }
+    $common_uid //= $fileuid;
+    $common_gid //= $filegid;
     $all_file_uids_match_common_uid &= ($fileuid == $common_uid);
     $all_file_gids_match_common_gid &= ($filegid == $common_gid);
     set_max($newest_file_timestamp_in_listing, $timestamp) if (!$skip);
@@ -1453,6 +1456,9 @@ sub main(@) {
     #
     if (($type != FILE_TYPE_DIR) && ($type < FILE_TYPE_MOUNT_POINT)) { $every_file_has_only_one_hard_link &= ($links == 1); }
   }
+
+  $all_file_uids_match_common_uid &= (defined $common_uid);
+  $all_file_gids_match_common_gid &= (defined $common_gid);
 
   my $common_messages = '';
   my $common_message_lines = 0;

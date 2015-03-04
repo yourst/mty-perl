@@ -1,0 +1,511 @@
+#!/usr/bin/perl -w
+# -*- cperl -*-
+#
+# btrfs-snapshot:
+#
+# Create, delete, rotate and list BtrFS subvolume snapshots in arbitrary
+# periodic categories (hourly, daily, weekly, monthly, etc)., automatically
+# named as e.g. 'daily@2014.mm.dd-HH-MM-SS', with a specified number of
+# snapshots in each category with descending timestamps in the past.
+#
+# Copyright 2012 - 2015 Matt T. Yourst <yourst@yourst.com>
+#
+
+use integer; use warnings;
+
+use MTY::Common::Common;
+use MTY::Common::Strings;
+use MTY::Filesystem::Files;
+use MTY::Filesystem::FileStats;
+use MTY::Filesystem::StatsCache;
+use MTY::Common::CommandLine;
+
+use MTY::Display::Colorize;
+use MTY::Display::ColorizeErrorsAndWarnings;
+use MTY::Display::TextInABox;
+use MTY::Display::Tree;
+use MTY::Display::PrintableSymbols;
+use MTY::Display::PrintableSymbolTools;
+
+use MTY::RegExp::Define;
+use MTY::RegExp::Tools;
+use MTY::RegExp::Blocks;
+use MTY::RegExp::Numeric;
+use MTY::RegExp::Strings;
+use MTY::RegExp::FilesAndPaths;
+
+use MTY::System::POSIX;
+use MTY::Filesystem::ExtAttrs;
+use MTY::Filesystem::BtrFS;
+use MTY::Filesystem::ProcFS;
+use MTY::Filesystem::Mounts;
+use MTY::System::Misc;
+
+my @items = (
+  ['aaa', 'bb', 'cccc', 'delta', 'bravo'],
+  ['aaa', 'bb', 'cccc', 'gamma'],
+  ['aaa', 'bb', 'cccc', 'delta', 'sigma'],
+  ['aaa', 'bb', 'cccc', 'delta', 'sigma', 'lambda']
+);
+
+#my @longest = longest_common_array_prefix(@items);
+#use DDS; pp @items;
+#pp @longest;
+#exit 0;
+
+
+
+my $subvolume = undef;
+
+my $snapshot_all_subvolumes = 0;
+my $snapshot_name = undef;
+my $delete_snapshot = undef;
+
+my $list_subvols = 0;
+my $list_snapshots = 0;
+my $list_labels = 0;
+my $diff_since_snapshot = undef;
+my $send_btrfs_stream_to_target = undef;
+my $rsync_to_target = undef;
+
+my $force_create_snapshots_dir = 0;
+my $max_backup_count = 0;
+my $fs_root = undef;
+
+my %command_line_options = (
+  # Snapshot creation and deletion
+  'all' => [ \$snapshot_all_subvolumes, 0, [qw(a snapshot-all)] ],
+  'snapshot' => [ \$snapshot_name, OPTION_VALUE_REQUIRED, [qw(ss s)] ],
+  'delete' => [ \$delete_snapshot, OPTION_VALUE_REQUIRED, [qw(d del destroy remove rm r)] ],
+  # Informational queries
+  'list-subvols' => [ \$list_subvols, 0, [ 'lsvols lv' ], ],
+  'list-snapshots' => [ \$list_snapshots, 0, [ qw(l ls lssnap) ], ],
+  'list-labels' => [ \$list_labels, 0, [ 'labels lslabels ll' ], ],
+  # Creating differential backups
+  'diff' => [ \$diff_since_snapshot, OPTION_VALUE_REQUIRED, [ qw(list-changes lschanges changes lsdiff) ], ],
+  'send' => [ \$send_btrfs_stream_to_target, OPTION_VALUE_REQUIRED, [ qw(send-diff send-to) ], ],
+  'rsync' => [ \$rsync_to_target, OPTION_VALUE_REQUIRED, [ qw(rsync-diff rsync-to) ], ],
+  # Additional Options
+  'subvolume' => [ \$subvolume, OPTION_VALUE_REQUIRED, [qw(subvol sub volume vol v)] ],
+  'backups' => [ \$max_backup_count, OPTION_VALUE_REQUIRED, [ 'n' ] ],
+  'backup' => [ \$max_backup_count, OPTION_ASSIGN_BOOL, [ 'b' ], 1, 0 ],
+  'force' => [ \$force_create_snapshots_dir, 0, [ 'f' ] ],
+);
+
+my $banner = print_banner($Y.'btrfs-snapshot', R.'BtrFS snapshot creation, rotation, querying and management utility', Y);
+
+my @command_line_options_help = (
+  [ OPTION_HELP_LITERAL ] => $banner,
+
+  [ OPTION_HELP_SYNTAX ] => undef,
+
+  [ OPTION_HELP_WRAPPED ] => 'Creates a snapshot of subvolume '.Y.'/path/of/subvolume'.X.' in '.
+    Y.U.'/path/of/subvolume'.UX.G.'/.snapshots/'.G.U.'SnapshotName'.X.' '.
+    'or if no snapshot name is specified, the current time and date will '.
+    'be used to generate a default snapshot name of the form '.
+    format_quoted($Y.'snapshot-'.$G.'YYYYMMDD-HHMMSS').'.',
+
+  [ OPTION_HELP_CATEGORY ] => 'Commands and Actions', 
+
+  'all'    =>   'Create snapshots of all snapshot-enabled subvolumes (-list-subvols will show these) '.
+                'using the specified label',
+
+  'snapshot' => 'Create a snapshot of the specified subvolume with the label given by this option',
+
+  'subvolume' => 'Specify the subvolume to snapshot, delete or otherwise act upon',
+
+  [ OPTION_HELP_DEFAULT ] => 'If neither the -subvolume nor -snapshot options are provided, the first '.
+    'non-option argument is the subvolume, and the second non-option argument is the snapshot label. '.
+    'If only the -snapshot option is provided, the first non-option argument must be the subvolume.',
+
+  [ OPTION_HELP_CATEGORY ] => 'Deleting Snapshots by Name, Origin Subvolume or Label', 
+
+  'delete' =>   'Delete snapshot(s) specified by:'.NL.
+                K.' '.dot.' '.X.'full path (e.g. '.C.'"/path/to/subvol/.snapshots/snapshot-to-delete"'.X.')'.NL.
+                K.' '.dot.' '.X.'origin subvolume (to delete all snapshots of that subvolume)'.NL.
+                K.' '.dot.' '.X.'label (e.g. '.C.'"daily"'.X.', where the label has no "/" characters)'.NL.
+                R.'(For safety reasons, this command intentionally only allows deleting snapshots;'.
+                'use "btrfs subvol delete" to remove actual subvolumes.)'.X,
+
+  [ OPTION_HELP_CATEGORY ] => 'Informational Queries', 
+
+  'list-subvols' => 'List all subvolumes (in the specified filesystem or the root by default) '.
+                    'which are configured to retain snapshots (i.e. writable subvolumes which '.
+                    'contain a .snapshots subdirectory)',
+
+  'list-snapshots' => 'List all snapshots as a tree, with a main branch for each enabled subvolume, '.
+                      'sub-branches for the snapshot types or labels defined for the subvolume, and '.
+                      'leaf nodes with the snapshot timestamp',
+
+  'list-labels' => 'List all labels applied to any existing snapshots',
+
+  [ OPTION_HELP_CATEGORY ] => 'Backup Count and Rotation',
+
+  'backups' => 'Assuming the base snapshot name is "SnapshotName", -backups maintains '.
+               'a queue of at most '.G.'N'.X.' chronologically ordered backups named '.
+               'e.g. '.G.'SnapshotName'.Y.'.2014-01-01-12:00:00'.X.' (i.e. using the '.
+               'actual timestamp of when that snapshot was created.'.NL.
+               NL.
+               'Whenever a new snapshot is created, the oldest snapshot in '.
+               'the queue is deleted if N snapshots already exist. The new '.
+               'snapshot is then created using the X.datestamp naming scheme '.
+               'above, and the base name (e.g. '.format_quoted($G.'SnapshotName').') '.
+               'is then symlinked to this newly created snapshot. This approach '.
+               'makes the entire process atomic since it never renames subvolumes.'.NL,
+
+  'backup' =>   'Equivalent to "-backups 1"',
+
+  [ OPTION_HELP_CATEGORY ] => 'Creating Differential Backups', 
+
+  [ OPTION_HELP_WRAPPED ] => '(All of these options require both a subvolume path and a snapshot name, '.
+                             'specified either by the -subvolume and -snapshot options, or as the first '.
+                             'and second non-option arguments, or any combination thereof):',
+
+  'diff' => 'Compared to the specified snapshot, list the files, directories and any other filesystem '.
+            'objects in the snapshot\'s corresponding live subvolume which were added, deleted, modified '.
+            'or have updated attributes since the snapshot was created. May be combined with the ',
+
+  'send' => 'Create a native BtrFS data stream comprising only the differences between the two specified '.
+            'snapshots, and send this stream to the (or pipe it to e.g. > /dev/tcp/some-remote-host/1234)',
+
+  'rsync' => 'Use rsync to transfer only the differences between the two specified snapshots, and send these '.
+             'updates to the specified remote host, or copy only the changed files to another local directory',
+
+  [ OPTION_HELP_CATEGORY ] => 'Additional Options',
+
+  'force' =>  'If the '.Y.'/path/of/subvolume/.snapshots'.X.' directory does not exist, '.
+              'it will automatically be created.',
+
+# 'config' => 'Use the specified configuration file to define per-label backup counts',
+);
+
+sub print_progress($) {
+  printfd(STDERR, $G.' '.checkmark.' '.$_[0].NL);
+}
+
+my $snapshot_timestamp_re =
+  qr{\d\d\d\d \. \d\d \. \d\d \- \d\d \. \d\d \. \d\d}oax;
+
+my $snapshot_path_re = 
+  qr{\A (.*?) /\.snapshots/ ([^@]+) @ ($snapshot_timestamp_re) \Z}oamsx;
+
+my @all_subvols = ( );
+my @subvols_to_snapshot = ( );
+my @excluded_subvols = ( );
+my @all_snapshots = ( );
+my %origin_label_timestamp_to_subvol_info = ( );
+my %labels_to_snapshots = ( );
+my $btrfs_subvols = query_btrfs_subvols();
+
+#
+# Create structural metadata concerning the snapshot-enabled subvolumes,
+# any existing snapshots of them, and the labels used to group those
+# snapshots and define their retention and rotation policies:
+# 
+sub find_snapshot_enabled_subvols() {
+  while (my ($subvol, $info) = each %$btrfs_subvols) {
+    if (!starts_with($subvol, '/')) { $subvol = '/'.$subvol; }
+    $info->{path} = $subvol;
+    if ($info->{snapshot} && $info->{readonly}) {
+      if ($subvol =~ $snapshot_path_re) {
+        # Existing read only snapshot with a recognized name format:
+        my ($origin, $label, $timestamp) = ($1, $2, $3);
+        $info->{origin} = $origin;
+        $info->{label} = $label;
+        $info->{timestamp} = $timestamp;
+        my $origin_hash = ($origin_label_timestamp_to_subvol_info{$origin} //= { });
+        my $origin_and_label_hash = ($origin_hash->{$label} //= { });
+        $origin_and_label_hash->{$timestamp} = $info;
+        push @all_snapshots, $info;
+        my $snapshots_with_label = ($labels_to_snapshots{$label} //= [ ]);
+        push @$snapshots_with_label, $info;
+      } else {
+        # warning('ignoring unsupported snapshot in '.$subvol);
+      }
+    } elsif (!$info->{readonly}) {
+      # Normal writable subvolume which is eligible for us to snapshot:
+      push @all_subvols, $info;
+      my $enabled = is_file_type_nofollow($subvol.'/.snapshots', FILE_TYPE_DIR);
+      my $subvol_list = ($enabled) ? \@subvols_to_snapshot : \@excluded_subvols;
+      push @$subvol_list, $info;
+    }
+  }
+}
+
+
+sub all_snapshots_to_tree() {
+  my $root_node = [
+    [
+      C.U.'All subvolumes enabled for snapshots'.X,
+      [ TREE_CMD_HORIZ_BRANCH_LENGTH, 1 ],
+      [ TREE_CMD_SUB_BRANCH_STYLE, 'double' ],
+    ],
+  ];
+
+  my $timestamp_sep_char_color = K;
+
+  my $timestamp_string_length = length('yyyy.mm.dd.hh.mm.ss');
+  my $dot_or_dash_re = qr{[\.\-]}oax;
+  my $repeated_prefix_field_separator = K_1_2.'.'.Y_1_2;
+  my $unique_suffix_field_separator = K_2_3.'.'.Y;
+
+  while (my ($subvol, $labels) = each %origin_label_timestamp_to_subvol_info) {
+    my $subvol_node = [
+      [ 
+        [ TREE_CMD_SYMBOL, C_3_4.dice_5_dots ],
+        [ TREE_CMD_SUB_BRANCH_COLOR, G_1_2 ],
+        [ TREE_CMD_SUB_BRANCH_STYLE, 'double' ],
+        C.$subvol,
+      ],
+    ];
+
+    while (my ($label, $timestamps) = each %$labels) {
+      my $label_node = [
+        [
+          [ TREE_CMD_SYMBOL, G_3_4.checkmark_in_box ],
+          [ TREE_CMD_SUB_BRANCH_COLOR, Y_1_2 ],
+          [ TREE_CMD_SUB_BRANCH_STYLE, 'rounded' ],
+          G.$label,
+        ],
+      ];
+      
+      my @timestamps = sort keys %$timestamps;
+
+      my $repeated_prefix = longest_common_string_component_prefix(@timestamps, '.', $dot_or_dash_re);
+
+      my $formatted_repeated_prefix = 
+        Y_1_2.$repeated_prefix; #($repeated_prefix =~ s{\.}{$repeated_prefix_field_separator}roaxg).K.'.'.Y;
+      $formatted_repeated_prefix =~ s{\-}{.}oaxg;
+      $formatted_repeated_prefix =~ s{\.}{$repeated_prefix_field_separator}oaxg;
+      # (((length $repeated_prefix) < $timestamp_string_length) ? K.'.'.Y : '');
+
+      while (my ($i, $timestamp) = each @timestamps) {
+        my $snapshot = $timestamps->{$timestamp};
+        
+        my $formatted_timestamp;
+        
+        if ($i > 0) {
+          my $unique_suffix = substr($timestamp, length($repeated_prefix));
+          $unique_suffix =~ s{\-}{.}oaxg;
+          $unique_suffix =~ s{\.}{$unique_suffix_field_separator}oaxg;
+          $formatted_timestamp = $formatted_repeated_prefix .
+            Y.$unique_suffix.X;
+        } else {
+          $formatted_timestamp = Y.$timestamp.X;
+          $formatted_timestamp =~ s{\-}{.}oaxg;
+          $formatted_timestamp =~ s{\.}{$unique_suffix_field_separator}oaxg;
+        }
+
+
+
+        my $uuid_sep = ORANGE_2_3.'-'.ORANGE;
+
+        my $snapshot_node = [
+          [
+            [ TREE_CMD_SYMBOL, Y_2_3.counterclockwise_curved_arrow.' ' ],
+            Y.$formatted_timestamp,
+            '  ',
+            ORANGE_2_3.'(uuid '.ORANGE.
+              ($snapshot->{uuid} =~ s{\-}{$uuid_sep}roaxg).ORANGE_2_3.')'.X,
+          ],
+        ];
+        push @$label_node, $snapshot_node;
+      }
+
+      push @$subvol_node, $label_node;
+    }
+
+    push @$root_node, $subvol_node;
+  }
+
+  return $root_node;
+}
+
+sub main {
+  printfd(STDERR, print_banner($Y.'btrfs-snapshot', $R.'BtrFS snapshot creation, rotation, querying and management utility', $R).NL);
+
+  my ($args, $invalid_args) = parse_and_check_command_line(%command_line_options, @ARGV, @command_line_options_help);
+
+  $subvolume //= $args->[0];
+  $snapshot_name //= $args->[1];
+
+  my $options_requring_subvolume = 
+    count_there($snapshot_name, $diff_since_snapshot, 
+                $send_btrfs_stream_to_target, $rsync_to_target);
+
+  my $options_not_requiring_subvolume =
+    count_true($snapshot_all_subvolumes, $list_subvols, $list_snapshots, $list_labels) +
+    count_there($delete_snapshot);
+
+  my $mutually_exclusive_required_option_count =
+    $options_requring_subvolume + $options_not_requiring_subvolume;
+#prints('options_requring_subvolume = ', $options_requring_subvolume, NL);
+#prints('options_not_requring_subvolume = ', $options_not_requring_subvolume, NL);
+#prints('mutually_exclusive_required_option_count = ', $mutually_exclusive_required_option_count, NL);
+
+  if (($mutually_exclusive_required_option_count != 1) ||
+      ((($options_requring_subvolume > 0) && (!defined $subvolume)) ||
+      (($options_not_requiring_subvolume > 0) && (defined $subvolume)))) {
+    print_command_line_options_help(%command_line_options, @command_line_options_help);
+    return 255;
+  }
+
+  find_snapshot_enabled_subvols();
+
+  if (defined $delete_snapshot) { $subvolume = $delete_snapshot; }
+
+  if (defined $subvolume) {
+    $subvolume = resolve_path($subvolume);
+    $fs_root = find_mount_point($subvolume);
+    if (!defined $fs_root) { die('Cannot find mount point for subvolume '.$subvolume); }
+    if ($fs_root ne '/') { $fs_root = strip_trailing_slash($fs_root); }
+  }
+
+  if ($snapshot_all_subvolumes) {
+    snapshot_all_subvolumes();
+  } elsif (defined $snapshot_name) {
+    create_snapshot_and_rotate_backups($subvolume, $snapshot_name)
+  } elsif (defined $delete_snapshot) {
+    $snapshot_name = $delete_snapshot;
+    $subvolume = $delete_snapshot;
+  } elsif ($list_subvols) { 
+    prints(join(NL, map { $_->{path} } @subvols_to_snapshot));
+  } elsif ($list_labels) {
+    prints(join(NL, sort keys %labels_to_snapshots)); 
+  } elsif ($list_snapshots) {
+    my $tree = all_snapshots_to_tree();
+    print_tree($tree);
+  } elsif (!defined $subvolume) {
+    # warn("No subvolume name specified.");
+    print_command_line_options_help(%command_line_options, @command_line_options_help);
+    exit 0;
+  }
+}
+
+main(@ARGV);
+
+__END__
+
+
+
+
+my $timestamp = strftime('%Y.%m.%d-%H.%M.%S', localtime());
+
+
+# Don't use a redundant leading '/' if snapshotting the root directory:
+my $snapshots_dir = $subvolume.(($subvolume eq '/') ? '' : '/').'.snapshots';
+
+my $target_dir = $snapshots_dir.'/'.$snapshot_name;
+if ($max_backup_count > 0) { $target_dir .= '@'.$timestamp; }
+
+if (! -d $snapshots_dir) {
+  if ($force_create_snapshots_dir) {
+    mkdirs($snapshots_dir,) 
+      || die('Cannot create directory '.$snapshots_dir);
+  } else {
+    prints($G.$snapshots_dir.$X.' does not exist: '.
+          'skipping snapshot of subvolume '.$Y.$subvolume.$X.NL);
+    exit 0;
+  }
+}
+
+if (! -d $snapshots_dir) { 
+  die($snapshots_dir.' cannot be created, or already exists but is not a directory');
+}
+
+my $target_dir_filetype = get_file_type($target_dir);
+
+if (defined $target_dir_filetype) {
+  if ($target_dir_filetype == FILE_TYPE_DIR) {
+    remove_btrfs_subvol($target_dir) || die('Failed to remove existing snapshot subvolume directory '.$target_dir);
+    print_progress('Removed old snapshot target directory '.$C.$target_dir);
+  } elsif ($target_dir_filetype == FILE_TYPE_SYMLINK) {
+    # The target is a symlink: just remove it so we can create a subvolume 
+    # directory with the same name (usually this occurs when switching from
+    # simple single snapshot mode to a series of multiple backups)
+    unlink($target_dir) || die('Failed to remove target directory symlink '.$target_dir);
+    print_progress('Removed symlink with same name as target directory '.$C.$target_dir);
+  } else {
+    die('Target directory '.$target_dir.' already exists, but is neither a directory '.NL.
+          'nor a symlink (it appears to be a '.$file_type_to_description{$target_dir_filetype}.')');
+  }
+}
+
+create_btrfs_snapshot($subvolume, $target_dir)
+  || die('Failed to create snapshot of subvolume '.$subvolume.' in target directory '.$target_dir);
+
+print_progress($Y.'Created snapshot'.$K.' of subvolume '.$C.$subvolume.$K.' in new snapshot directory '.$G.$target_dir);
+
+update_subvol_xattrs($target_dir, $fs_root);
+
+print_progress($Y.'Set extended attributes'.$K.' of new snapshot in '.$G.$target_dir.$Y);
+
+set_btrfs_property($target_dir, 'ro', 'true');
+
+print_progress($Y.'Set read only flag'.$K.' on new snapshot in '.$G.$target_dir.$Y);
+
+if ($max_backup_count > 0) {
+  my @existing_snapshots = read_directory($snapshots_dir);
+  
+  my $oldest_gen = 1<<62;
+  my $oldest_snapshot_path = undef;
+  my $existing_snapshot_count = 0;
+
+  foreach $f (@existing_snapshots) {
+    next if ($f =~ /^\./oax); # skip dot files + . and .. dirs
+    next unless (starts_with($f, $snapshot_name.'@'));
+    my $fullname = $snapshots_dir.'/'.$f;
+    my $subvol_info = query_btrfs_subvol($fullname, $fs_root);    
+    my $gen = $subvol_info->{gen};
+    if (!defined $gen) { die('Cannot get generation of '.$fullname); }
+    if ($gen <= $oldest_gen) {
+      $oldest_gen = $gen;
+      $oldest_snapshot_path = $fullname;
+    }
+    $existing_snapshot_count++;
+  }
+
+  print_progress($Y.'Oldest snapshot'.$K.' is '.$G.$oldest_snapshot_path.
+                   $K.' with generation '.$G.$oldest_gen);
+
+  if ($existing_snapshot_count <= $max_backup_count) {
+    printfd(STDERR, $R.' '.x_symbol.' '.$Y.'Skipping removal of oldest snapshot'.$K.
+          ', since there were only '.$G.$existing_snapshot_count.$K.' out of '.
+          $G.$max_backup_count.$K.' snapshots'.$X.NL);
+  } else {
+    remove_btrfs_subvol($oldest_snapshot_path) || 
+      die('Could not remove oldest snapshot "'.$oldest_snapshot_path.'"');
+    print_progress($Y.'Removed oldest snapshot '.$G.$oldest_snapshot_path.
+                     $K.' from generation '.$G.$oldest_gen);
+  }
+
+  my $symlink_path = $snapshots_dir.'/'.$snapshot_name;
+
+  if (-l $symlink_path) { 
+    unlink($symlink_path) 
+      || die('Cannot remove symlink "'.$symlink_path.'"'); 
+  }
+
+  my $relative_target_dir = $snapshot_name.'@'.$timestamp;
+
+  symlink($relative_target_dir, $symlink_path)
+    || die('Cannot symlink '.$target_dir.' to '.$symlink_path);
+
+  print_progress($Y.'Linked '.$G.$target_dir.$K.' to '.$G.$symlink_path);
+}
+
+exit 0;
+__END__
+
+if (defined $delete_snapshot) {
+  if (!is_btrfs_subvol_or_root($subvolume)) 
+    { die("'$subvolume' is not a BtrFS subvolume nor a btrfs root directory"); };
+
+  if (!is_btrfs_snapshot($subvolume)) 
+    { die("'$subvolume' is not a BtrFS snapshot"); }
+
+  print_progress($Y.'Deleting snapshot "'.$C.$subvolume.$K.'"...');
+  remove_btrfs_subvol($subvolume) || die("Could not delete snapshot named '$subvolume'");
+  print_progress($Y.'Deleted snapshot "'.$C.$subvolume.$K.'"');
+  exit 0;
+}
