@@ -1,6 +1,0 @@
-#!/bin/sh
-if [[ -r "$1" ]]; then
-  exec perlre -s -m -x '$preprocessor_line_info_re' '' :: $1
-else
-  exec perlre -s -m -x '$preprocessor_line_info_re' ''
-fi

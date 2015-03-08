@@ -1,7 +1,0 @@
-#/bin/sh
-# use -stdout option to test this first!
-perlre -s -m -x -e '^\#pragma \s once \n' \
-  'my $s = "__INCLUDED_".($filename =~ s{[\/\.\-]}{_}roaxg)."__"; "#ifndef $s\n"."#define $s\n"."#pragma once\n";' :: $@
-perlre -s -m -x -e '\z' \
-  'my $s = "__INCLUDED_".($filename =~ s{[\/\.\-]}{_}roaxg)."__"; "#endif // ! $s\n\n";' :: $@
-# s{\.\/}{}roaxg =~ 

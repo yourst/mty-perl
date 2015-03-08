@@ -1,5 +1,0 @@
-#!/usr/bin/perl -w
-# =*- cperl -*-
-use Config;
-foreach (@ARGV) { print("PERL_".uc($_)." := ".$Config{lc($_)}."\n"); }
-
